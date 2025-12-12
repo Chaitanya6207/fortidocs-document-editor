@@ -1,4 +1,3 @@
-// frontend/src/pages/Register.jsx
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -16,16 +15,24 @@ function Register() {
   const handleConnectWallet = async () => {
     try {
       if (!window.ethereum) {
-        alert("MetaMask not detected. Install MetaMask and import Ganache account first.");
+        alert("MetaMask is not installed!");
         return;
       }
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-      if (accounts && accounts.length > 0) {
-        setWalletAddress(accounts[0]);
+
+      // Force popup by requesting connection
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+
+      if (accounts.length === 0) {
+        alert("No accounts found in MetaMask!");
+        return;
       }
+
+      setWalletAddress(accounts[0]);
     } catch (err) {
-      console.error("Wallet connect error:", err);
-      alert("Could not connect wallet. See console for details.");
+      console.error("MetaMask connection failed:", err);
+      alert("Failed to connect wallet.");
     }
   };
 
@@ -35,16 +42,24 @@ function Register() {
       alert("Passwords do not match");
       return;
     }
+
     setLoading(true);
+
     try {
-      const payload = { name, email, password, walletAddress };
-      const res = await axios.post("http://localhost:5000/api/auth/register", payload);
-      alert("Registered successfully. Please login.");
+      const payload = {
+        name,
+        email,
+        password,
+        walletAddress,
+      };
+
+      await axios.post("http://localhost:5000/api/auth/register", payload);
+
+      alert("Registered successfully!");
       navigate("/login");
     } catch (err) {
-      console.error("Registration error:", err);
-      const message = err.response?.data?.error || "Registration failed";
-      alert(message);
+      console.error("Registration Error:", err);
+      alert(err.response?.data?.error || "Registration failed.");
     } finally {
       setLoading(false);
     }
@@ -53,54 +68,49 @@ function Register() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h2>FortiDocs Registration</h2>
+        <h2>Create Account</h2>
+
         <form onSubmit={handleSubmit} style={styles.form}>
-          <label>
-            Full Name
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} required style={styles.input} />
-          </label>
+          <label>Name</label>
+          <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} required />
 
-          <label>
-            Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={styles.input} />
-          </label>
+          <label>Email</label>
+          <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
 
-          <label>
-            Password
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required style={styles.input} />
-          </label>
+          <label>Password</label>
+          <input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
 
-          <label>
-            Confirm Password
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required style={styles.input} />
-          </label>
+          <label>Confirm Password</label>
+          <input style={styles.input} type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
 
-          <div style={{ marginTop: 8 }}>
-            <button type="button" onClick={handleConnectWallet} style={styles.walletBtn}>
-              {walletAddress ? `Connected: ${walletAddress.substring(0, 6)}...${walletAddress.slice(-4)}` : "Connect Wallet (MetaMask)"}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleConnectWallet}
+            style={styles.walletBtn}
+          >
+            {walletAddress
+              ? `Connected: ${walletAddress.substring(0, 6)}...${walletAddress.slice(-4)}`
+              : "Connect Wallet"}
+          </button>
 
-          <button type="submit" style={styles.button} disabled={loading}>
+          <button type="submit" disabled={loading} style={styles.button}>
             {loading ? "Registering..." : "Register"}
           </button>
         </form>
 
-        <p style={{ marginTop: "10px" }}>
-          Already have an account? <Link to="/login">Login here</Link>
-        </p>
+        <p>Already have an account? <Link to="/login">Log in</Link></p>
       </div>
     </div>
   );
 }
 
 const styles = {
-  container: { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "#f4f4f4" },
-  card: { background: "#fff", padding: "24px", borderRadius: "8px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", minWidth: "320px" },
-  form: { display: "flex", flexDirection: "column", gap: "12px" },
-  input: { width: "100%", padding: "8px", marginTop: "4px" },
-  button: { marginTop: "8px", padding: "10px", border: "none", background: "#16a34a", color: "white", borderRadius: "4px", cursor: "pointer" },
-  walletBtn: { padding: "8px 12px", border: "1px solid #ddd", background: "#fff", cursor: "pointer", borderRadius: 6 },
+  container: { display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", background: "#f1f5f9" },
+  card: { background: "#fff", padding: 20, borderRadius: 8, boxShadow: "0 2px 10px rgba(0,0,0,0.1)", width: 320 },
+  form: { display: "flex", flexDirection: "column", gap: 10 },
+  input: { padding: 8, borderRadius: 4, border: "1px solid #ccc" },
+  button: { padding: 10, background: "#2563eb", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", marginTop: 10 },
+  walletBtn: { padding: 10, background: "#22c55e", color: "#fff", borderRadius: 4, border: "none", cursor: "pointer" },
 };
 
 export default Register;

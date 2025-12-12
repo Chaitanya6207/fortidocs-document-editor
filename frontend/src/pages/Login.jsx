@@ -1,4 +1,3 @@
-// frontend/src/pages/Login.jsx
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -9,128 +8,134 @@ function Login() {
   const [walletAddress, setWalletAddress] = useState("");
   const [useWallet, setUseWallet] = useState(false);
   const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
 
-  const handleConnectWallet = async () => {
-    if (!window.ethereum) {
-      alert("MetaMask not detected. Install MetaMask first.");
-      return;
-    }
+  const connectWallet = async () => {
     try {
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-      if (accounts && accounts.length > 0) setWalletAddress(accounts[0]);
+      if (!window.ethereum) {
+        alert("MetaMask is not installed.");
+        return;
+      }
+
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+
+      setWalletAddress(accounts[0]);
     } catch (err) {
-      console.error("Wallet connect error", err);
+      console.error("Wallet connection error:", err);
     }
   };
 
-  async function getNonce(email) {
+  const getNonce = async (email) => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/auth/nonce/${encodeURIComponent(email)}`);
+      const res = await axios.get(`http://localhost:5000/api/auth/nonce/${email}`);
       return res.data.nonce;
     } catch (err) {
-      console.error("Failed to get nonce:", err);
+      console.error("Nonce fetch error:", err);
+      alert("Error fetching user nonce.");
       return null;
     }
-  }
+  };
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
 
-    if (useWallet) {
-      if (!walletAddress) {
-        alert("Connect a wallet to use the secure login");
-        setLoading(false);
-        return;
-      }
+    if (!useWallet) {
       try {
-        const nonce = await getNonce(email);
-        if (!nonce) throw new Error("Could not obtain nonce");
-
-        const message = `Login nonce: ${nonce}`;
-        const signature = await window.ethereum.request({
-          method: "personal_sign",
-          params: [message, walletAddress],
+        const res = await axios.post("http://localhost:5000/api/auth/login", {
+          email,
+          password,
         });
-
-        const payload = { email, password, walletAddress, signature };
-        const res = await axios.post("http://localhost:5000/api/auth/login-verify", payload);
 
         localStorage.setItem("token", res.data.token);
         localStorage.setItem("user", JSON.stringify(res.data.user));
-        alert("Login successful (verified with wallet)");
         navigate("/editor");
       } catch (err) {
-        console.error("Secure login error:", err);
-        alert(err.response?.data?.error || err.message || "Login failed");
-      } finally {
-        setLoading(false);
+        alert(err.response?.data?.error || "Login failed");
       }
+      setLoading(false);
+      return;
+    }
+
+    if (useWallet && !walletAddress) {
+      alert("Please connect your wallet first.");
+      setLoading(false);
       return;
     }
 
     try {
-      const res = await axios.post("http://localhost:5000/api/auth/login", { email, password });
+      const nonce = await getNonce(email);
+
+      const message = `Login nonce: ${nonce}`;
+      const signature = await window.ethereum.request({
+        method: "personal_sign",
+        params: [message, walletAddress],
+      });
+
+      const res = await axios.post("http://localhost:5000/api/auth/login-verify", {
+        email,
+        password,
+        walletAddress,
+        signature,
+      });
+
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("user", JSON.stringify(res.data.user));
-      alert("Login successful");
+      alert("Login Verified with Wallet!");
       navigate("/editor");
     } catch (err) {
-      console.error("Login error:", err);
-      alert(err.response?.data?.error || "Login failed");
-    } finally {
-      setLoading(false);
+      alert(err.response?.data?.error || "Secure login failed");
     }
+
+    setLoading(false);
   };
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h2>FortiDocs Login</h2>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <label>Email
-            <input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} required style={styles.input} />
-          </label>
+        <h2>Login</h2>
 
-          <label>Password
-            <input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} required style={styles.input} />
-          </label>
+        <form onSubmit={handleLogin} style={styles.form}>
+          <label>Email</label>
+          <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
 
-          <label style={{display:"flex", gap:8, alignItems:"center"}}>
-            <input type="checkbox" checked={useWallet} onChange={(e)=>setUseWallet(e.target.checked)} />
-            <span>Use connected wallet for extra verification</span>
+          <label>Password</label>
+          <input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={useWallet} onChange={(e) => setUseWallet(e.target.checked)} />
+            Enable Secure Wallet Login
           </label>
 
           {useWallet && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button type="button" onClick={handleConnectWallet} style={styles.walletBtn}>
-                {walletAddress ? `Connected: ${walletAddress.substring(0,6)}...${walletAddress.slice(-4)}` : "Connect Wallet (MetaMask)"}
-              </button>
-              <div style={{ fontSize: 12, color: "#666" }}>{walletAddress ? "" : "Click connect then sign when prompted"}</div>
-            </div>
+            <button type="button" onClick={connectWallet} style={styles.walletBtn}>
+              {walletAddress
+                ? `Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.slice(-4)}`
+                : "Connect Wallet"}
+            </button>
           )}
 
-          <button type="submit" style={styles.button} disabled={loading}>
+          <button disabled={loading} style={styles.button}>
             {loading ? "Logging in..." : "Login"}
           </button>
         </form>
 
-        <p style={{ marginTop: 10 }}>
-          Don't have an account? <Link to="/register">Register</Link>
-        </p>
+        <p>Don't have an account? <Link to="/register">Register</Link></p>
       </div>
     </div>
   );
 }
 
 const styles = {
-  container: { minHeight:"100vh", display:"flex", justifyContent:"center", alignItems:"center", background:"#f4f4f4" },
-  card: { background:"#fff", padding:24, borderRadius:8, boxShadow:"0 2px 8px rgba(0,0,0,0.1)", minWidth:320 },
-  form: { display:"flex", flexDirection:"column", gap:12 },
-  input: { width:"100%", padding:8, marginTop:4 },
-  button: { marginTop:8, padding:10, border:"none", background:"#2563eb", color:"#fff", borderRadius:4, cursor:"pointer" },
-  walletBtn: { padding:"8px 12px", border:"1px solid #ddd", background:"#fff", cursor:"pointer", borderRadius:6 }
+  container: { display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", background: "#eef2ff" },
+  card: { background: "white", padding: 20, borderRadius: 10, width: 320, boxShadow: "0 3px 10px rgba(0,0,0,0.15)" },
+  form: { display: "flex", flexDirection: "column", gap: 10 },
+  input: { padding: 8, border: "1px solid #aaa", borderRadius: 4 },
+  button: { padding: 10, background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", marginTop: 10 },
+  walletBtn: { padding: 10, background: "#22c55e", color: "white", border: "none", borderRadius: 6, cursor: "pointer" },
 };
 
 export default Login;
