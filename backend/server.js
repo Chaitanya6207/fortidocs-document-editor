@@ -9,6 +9,12 @@ const authRoutes = require("./routes/auth");
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use("/api/auth", authRoutes); // existing
+app.use("/api/files", require("./routes/files"));
+app.use("/api/share", require("./routes/share"));
+app.use('/api/share', require('./routes/received')); 
+app.use("/api/doc", require("./routes/doc"));
+
 
 const PORT = process.env.PORT || 5000;
 

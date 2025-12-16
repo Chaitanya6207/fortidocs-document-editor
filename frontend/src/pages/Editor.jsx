@@ -1,106 +1,77 @@
-// frontend/src/pages/Editor.jsx
-import React, { useEffect, useState } from 'react';
-import api from '../utils/api';
+import React, { useEffect, useRef, useState } from "react";
+import ReactQuill from "react-quill";
+import "react-quill/dist/quill.snow.css";
+import api from "../utils/api";
+import htmlDocx from "html-docx-js/dist/html-docx";
+import { saveAs } from "file-saver";
 
 export default function Editor() {
-  const [files, setFiles] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [recipientEmail, setRecipientEmail] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [sharing, setSharing] = useState(false);
+  const [content, setContent] = useState("");
+  const [title, setTitle] = useState("Untitled Document");
+  const [saving, setSaving] = useState(false);
+  const quillRef = useRef(null);
 
-  const fetchMyFiles = async () => {
+  async function saveDocument() {
+    setSaving(true);
     try {
-      const res = await api.get('/api/files/my');
-      setFiles(res.data);
-    } catch (err) {
-      console.error('fetch files', err);
-    }
-  };
-
-  useEffect(() => { fetchMyFiles(); }, []);
-
-  const handleFileChange = (e) => {
-    setSelectedFile(e.target.files[0]);
-  };
-
-  const handleUpload = async () => {
-    if (!selectedFile) { alert('Choose a file'); return; }
-    setUploading(true);
-    try {
+      const blob = htmlDocx.asBlob(
+        `<h1>${title}</h1>${content}`
+      );
       const form = new FormData();
-      form.append('file', selectedFile);
-      // optionally include ownerWallet if desired:
-      const owner = JSON.parse(localStorage.getItem('user') || '{}');
-      if (owner?.walletAddress) form.append('ownerWallet', owner.walletAddress);
+      form.append("file", blob, `${title}.docx`);
 
-      const res = await api.post('/api/files/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      await api.post("/api/doc/save", form, {
+        headers: { "Content-Type": "multipart/form-data" },
       });
 
-      alert('Uploaded: ' + res.data.cid);
-      setSelectedFile(null);
-      fetchMyFiles();
+      alert("Document saved successfully");
     } catch (err) {
-      console.error('upload', err);
-      alert(err.response?.data?.error || 'Upload failed');
-    } finally {
-      setUploading(false);
+      alert("Save failed");
     }
-  };
+    setSaving(false);
+  }
 
-  const handleShare = async (fileId) => {
-    if (!recipientEmail) { alert('Enter recipient email'); return; }
-    setSharing(true);
-    try {
-      const res = await api.post('/api/share', { fileId, recipientEmail });
-      alert('Shared successfully');
-      setRecipientEmail('');
-      fetchMyFiles();
-    } catch (err) {
-      console.error('share', err);
-      alert(err.response?.data?.error || 'Share failed');
-    } finally {
-      setSharing(false);
-    }
-  };
+  function downloadDocument() {
+    const blob = htmlDocx.asBlob(
+      `<h1>${title}</h1>${content}`
+    );
+    saveAs(blob, `${title}.docx`);
+  }
 
   return (
     <div style={{ padding: 20 }}>
-      <h2>File Transfer — Upload & Share</h2>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        style={{ fontSize: 20, padding: 8, width: "100%" }}
+      />
 
-      <div style={{ marginBottom: 20 }}>
-        <input type="file" onChange={handleFileChange} />
-        <button onClick={handleUpload} disabled={uploading || !selectedFile}>
-          {uploading ? 'Uploading...' : 'Upload & Pin to IPFS'}
+      <ReactQuill
+        ref={quillRef}
+        value={content}
+        onChange={setContent}
+        style={{ height: "70vh", marginTop: 10 }}
+        modules={{
+          toolbar: [
+            [{ header: [1, 2, 3, false] }],
+            ["bold", "italic", "underline"],
+            [{ color: [] }, { background: [] }],
+            [{ align: [] }],
+            [{ list: "ordered" }, { list: "bullet" }],
+            ["link", "image"],
+            ["clean"],
+          ],
+        }}
+      />
+
+      <div style={{ marginTop: 15 }}>
+        <button onClick={saveDocument} disabled={saving}>
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button onClick={downloadDocument} style={{ marginLeft: 10 }}>
+          Download
         </button>
       </div>
-
-      <h3>Your files</h3>
-      <table border="1" cellPadding="8" style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th>Filename</th><th>CID</th><th>Action</th><th>Share</th>
-          </tr>
-        </thead>
-        <tbody>
-          {files.map(f => (
-            <tr key={f._id}>
-              <td>{f.filename}</td>
-              <td>
-                <a target="_blank" rel="noreferrer" href={`https://gateway.pinata.cloud/ipfs/${f.cid}`}>{f.cid}</a>
-              </td>
-              <td>
-                <button onClick={() => navigator.clipboard.writeText(`https://gateway.pinata.cloud/ipfs/${f.cid}`)}>Copy Link</button>
-              </td>
-              <td>
-                <input placeholder="recipient email" value={recipientEmail} onChange={(e)=>setRecipientEmail(e.target.value)} />
-                <button onClick={()=>handleShare(f._id)} disabled={sharing}>{sharing ? 'Sharing...' : 'Share'}</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

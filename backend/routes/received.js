@@ -9,37 +9,40 @@ const router = express.Router();
 
 /**
  * GET /api/share/received
- * Returns files shared to the logged-in user.
- * Criteria:
- *  - If the user's email matches recipientEmail in FileAccess
- *  - OR receiverId matches req.user.id (if share targeted to registered user)
+ * Returns files shared with the logged-in user (by email or receiverId).
  */
 router.get('/received', auth, async (req, res) => {
   try {
-    // load user to get email (if needed)
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // find matches by email or receiverId
+    const userEmail = (user.email || '').trim().toLowerCase();
+
+    // find fileAccess entries where recipientEmail (normalized) equals userEmail
+    // OR receiverId was explicitly set to this user's id
     const matches = await FileAccess.find({
       $or: [
-        { recipientEmail: user.email.toLowerCase() },
+        { recipientEmail: userEmail },
         { receiverId: req.user.id }
       ]
     }).sort({ createdAt: -1 });
 
-    // populate file metadata
-    const results = [];
-    for (const acc of matches) {
-      const file = await File.findById(acc.fileId);
-      if (!file) continue;
-      results.push({
+    // gather file IDs and fetch files in one query
+    const fileIds = matches.map(m => m.fileId);
+    const files = await File.find({ _id: { $in: fileIds } });
+    const filesById = {};
+    files.forEach(f => filesById[f._id.toString()] = f);
+
+    const output = matches.map(acc => {
+      const file = filesById[acc.fileId.toString()];
+      if (!file) return null;
+      return {
         accessId: acc._id,
-        permission: acc.permission,
         sharedAt: acc.createdAt,
-        blockchainTxHash: acc.blockchainTxHash || null,
-        recipientEmail: acc.recipientEmail,
+        permission: acc.permission,
         ownerId: acc.ownerId,
+        recipientEmail: acc.recipientEmail,
+        blockchainTxHash: acc.blockchainTxHash || null,
         file: {
           id: file._id,
           filename: file.filename,
@@ -49,10 +52,10 @@ router.get('/received', auth, async (req, res) => {
           size: file.size,
           createdAt: file.createdAt
         }
-      });
-    }
+      };
+    }).filter(Boolean);
 
-    res.json(results);
+    res.json(output);
   } catch (err) {
     console.error('GET /api/share/received error', err);
     res.status(500).json({ error: 'Failed to load received shares' });
