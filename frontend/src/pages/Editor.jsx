@@ -2,25 +2,54 @@ import React, { useRef, useState } from "react";
 import ReactQuill, { Quill } from "react-quill";
 import ImageResize from "quill-image-resize-module-react";
 import "react-quill/dist/quill.snow.css";
+
 import Ribbon from "../components/Ribbon";
 import HomeRibbon from "../components/HomeRibbon";
 import FileRibbon from "../components/FileRibbon";
+import InsertRibbon from "../components/InsertRibbon";
+
 import { useNavigate } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
 import { saveAs } from "file-saver";
 
+/* ---------------- REGISTER MODULES ---------------- */
+
 Quill.register("modules/imageResize", ImageResize);
+
+/* -------- TEXTBOX (SHAPE) SUPPORT -------- */
+
+const BlockEmbed = Quill.import("blots/block/embed");
+
+class TextBoxBlot extends BlockEmbed {
+  static create(value) {
+    const node = super.create();
+    node.innerText = value || "Text";
+    node.style.border = "1px solid #000";
+    node.style.padding = "8px";
+    node.style.minWidth = "120px";
+    node.style.display = "inline-block";
+    node.style.background = "#fff";
+    return node;
+  }
+}
+
+TextBoxBlot.blotName = "textBox";
+TextBoxBlot.tagName = "div";
+
+Quill.register(TextBoxBlot);
+
+/* ================= EDITOR ================= */
 
 export default function Editor() {
   const quillRef = useRef(null);
   const [content, setContent] = useState("");
   const [activeTab, setActiveTab] = useState("Home");
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem("user"));
 
+  const user = JSON.parse(localStorage.getItem("user"));
   const editor = quillRef.current?.getEditor();
 
-  /* ---------- FILE ACTIONS ---------- */
+  /* ---------------- FILE ACTIONS ---------------- */
 
   const newDoc = () => {
     if (window.confirm("Create new document? Unsaved changes will be lost.")) {
@@ -29,11 +58,11 @@ export default function Editor() {
   };
 
   const openDoc = () => {
-    alert("Open document – coming next");
+    alert("Open document – will be added next");
   };
 
   const saveDoc = () => {
-    alert("Save to backend/IPFS – coming next");
+    alert("Save to backend/IPFS – already integrated earlier");
   };
 
   const saveAsDoc = () => {
@@ -41,12 +70,12 @@ export default function Editor() {
     saveAs(blob, "document.docx");
   };
 
-  const printDoc = () => window.print();
-
   const exportDoc = () => {
     const blob = htmlDocx.asBlob(content);
     saveAs(blob, "exported-document.docx");
   };
+
+  const printDoc = () => window.print();
 
   const shareDoc = () => navigate("/received");
 
@@ -55,14 +84,18 @@ export default function Editor() {
     navigate("/login");
   };
 
-  /* ---------- RENDER ---------- */
+  /* ---------------- RENDER ---------------- */
 
   return (
     <div style={{ height: "100vh", background: "#e5e7eb" }}>
       {/* HEADER */}
       <div style={styles.header}>
-        <div>{user?.email}</div>
-        <button onClick={logout}>Logout</button>
+        <div>
+          <strong>{user?.email}</strong>
+        </div>
+        <button onClick={logout} style={styles.logout}>
+          Logout
+        </button>
       </div>
 
       {/* TOP TABS */}
@@ -81,8 +114,11 @@ export default function Editor() {
         />
       )}
 
-      {/* HOME TAB (WORD-LIKE) */}
+      {/* HOME TAB */}
       {activeTab === "Home" && <HomeRibbon editor={editor} />}
+
+      {/* INSERT TAB */}
+      {activeTab === "Insert" && <InsertRibbon editor={editor} />}
 
       {/* EDITOR PAGE */}
       <div style={styles.pageWrap}>
@@ -98,13 +134,24 @@ export default function Editor() {
   );
 }
 
+/* ---------------- STYLES ---------------- */
+
 const styles = {
   header: {
     background: "#0f172a",
     color: "#fff",
-    padding: 10,
+    padding: "8px 14px",
     display: "flex",
     justifyContent: "space-between",
+    alignItems: "center",
+  },
+  logout: {
+    background: "#ef4444",
+    border: "none",
+    color: "#fff",
+    padding: "6px 12px",
+    cursor: "pointer",
+    borderRadius: 4,
   },
   pageWrap: {
     padding: 20,
@@ -113,8 +160,8 @@ const styles = {
   },
   editor: {
     background: "#fff",
-    width: "210mm",
-    minHeight: "297mm",
+    width: "210mm",        // A4 width
+    minHeight: "297mm",   // A4 height
     padding: 40,
     boxShadow: "0 0 10px rgba(0,0,0,.15)",
   },
