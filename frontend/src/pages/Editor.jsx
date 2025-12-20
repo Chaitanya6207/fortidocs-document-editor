@@ -3,7 +3,8 @@ import ReactQuill, { Quill } from "react-quill";
 import ImageResize from "quill-image-resize-module-react";
 import "react-quill/dist/quill.snow.css";
 import Ribbon from "../components/Ribbon";
-import FileMenu from "../components/FileMenu";
+import HomeRibbon from "../components/HomeRibbon";
+import FileRibbon from "../components/FileRibbon";
 import { useNavigate } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
 import { saveAs } from "file-saver";
@@ -17,7 +18,9 @@ export default function Editor() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user"));
 
-  /* ---------------- FILE ACTIONS ---------------- */
+  const editor = quillRef.current?.getEditor();
+
+  /* ---------- FILE ACTIONS ---------- */
 
   const newDoc = () => {
     if (window.confirm("Create new document? Unsaved changes will be lost.")) {
@@ -26,11 +29,11 @@ export default function Editor() {
   };
 
   const openDoc = () => {
-    alert("Open existing document feature (next step)");
+    alert("Open document – coming next");
   };
 
   const saveDoc = () => {
-    alert("Document saved (connects to backend/IPFS next)");
+    alert("Save to backend/IPFS – coming next");
   };
 
   const saveAsDoc = () => {
@@ -38,42 +41,21 @@ export default function Editor() {
     saveAs(blob, "document.docx");
   };
 
-  const printDoc = () => {
-    window.print();
-  };
+  const printDoc = () => window.print();
 
   const exportDoc = () => {
     const blob = htmlDocx.asBlob(content);
     saveAs(blob, "exported-document.docx");
   };
 
-  const shareDoc = () => {
-    navigate("/received");
-  };
-
-  const closeEditor = () => {
-    navigate("/editor");
-  };
+  const shareDoc = () => navigate("/received");
 
   const logout = () => {
     localStorage.clear();
     navigate("/login");
   };
 
-  /* ---------------- RIBBON ACTIONS ---------------- */
-
-  function onAction(action, value) {
-    const editor = quillRef.current.getEditor();
-    const range = editor.getSelection(true);
-
-    if (action === "image") {
-      const url = prompt("Image URL");
-      if (url) editor.insertEmbed(range.index, "image", url);
-      return;
-    }
-
-    editor.format(action, value ?? true);
-  }
+  /* ---------- RENDER ---------- */
 
   return (
     <div style={{ height: "100vh", background: "#e5e7eb" }}>
@@ -83,28 +65,26 @@ export default function Editor() {
         <button onClick={logout}>Logout</button>
       </div>
 
-      {/* FILE TAB VIEW */}
+      {/* TOP TABS */}
+      <Ribbon activeTab={activeTab} setActiveTab={setActiveTab} />
+
+      {/* FILE TAB (HORIZONTAL) */}
       {activeTab === "File" && (
-        <FileMenu
+        <FileRibbon
           onNew={newDoc}
           onOpen={openDoc}
-          onShare={shareDoc}
           onSave={saveDoc}
           onSaveAs={saveAsDoc}
           onPrint={printDoc}
           onExport={exportDoc}
-          onClose={closeEditor}
+          onShare={shareDoc}
         />
       )}
 
-      {/* RIBBON */}
-      <Ribbon
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onAction={onAction}
-      />
+      {/* HOME TAB (WORD-LIKE) */}
+      {activeTab === "Home" && <HomeRibbon editor={editor} />}
 
-      {/* EDITOR */}
+      {/* EDITOR PAGE */}
       <div style={styles.pageWrap}>
         <ReactQuill
           ref={quillRef}
