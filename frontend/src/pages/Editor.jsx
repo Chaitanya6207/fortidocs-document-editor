@@ -3,7 +3,10 @@ import ReactQuill, { Quill } from "react-quill";
 import ImageResize from "quill-image-resize-module-react";
 import "react-quill/dist/quill.snow.css";
 import Ribbon from "../components/Ribbon";
+import FileMenu from "../components/FileMenu";
 import { useNavigate } from "react-router-dom";
+import htmlDocx from "html-docx-js/dist/html-docx";
+import { saveAs } from "file-saver";
 
 Quill.register("modules/imageResize", ImageResize);
 
@@ -14,11 +17,50 @@ export default function Editor() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user"));
 
-  function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+  /* ---------------- FILE ACTIONS ---------------- */
+
+  const newDoc = () => {
+    if (window.confirm("Create new document? Unsaved changes will be lost.")) {
+      setContent("");
+    }
+  };
+
+  const openDoc = () => {
+    alert("Open existing document feature (next step)");
+  };
+
+  const saveDoc = () => {
+    alert("Document saved (connects to backend/IPFS next)");
+  };
+
+  const saveAsDoc = () => {
+    const blob = htmlDocx.asBlob(content);
+    saveAs(blob, "document.docx");
+  };
+
+  const printDoc = () => {
+    window.print();
+  };
+
+  const exportDoc = () => {
+    const blob = htmlDocx.asBlob(content);
+    saveAs(blob, "exported-document.docx");
+  };
+
+  const shareDoc = () => {
+    navigate("/received");
+  };
+
+  const closeEditor = () => {
+    navigate("/editor");
+  };
+
+  const logout = () => {
+    localStorage.clear();
     navigate("/login");
-  }
+  };
+
+  /* ---------------- RIBBON ACTIONS ---------------- */
 
   function onAction(action, value) {
     const editor = quillRef.current.getEditor();
@@ -29,34 +71,40 @@ export default function Editor() {
       if (url) editor.insertEmbed(range.index, "image", url);
       return;
     }
-    if (action === "link") {
-      const url = prompt("Link URL");
-      if (url) editor.format("link", url);
-      return;
-    }
+
     editor.format(action, value ?? true);
   }
 
   return (
     <div style={{ height: "100vh", background: "#e5e7eb" }}>
+      {/* HEADER */}
       <div style={styles.header}>
-        <div>
-          <strong>{user?.email}</strong>
-          <div style={styles.wallet}>
-            {user?.walletAddress
-              ? `Wallet: ${user.walletAddress.slice(0, 10)}...`
-              : "No wallet"}
-          </div>
-        </div>
-        <button onClick={logout} style={styles.logout}>Logout</button>
+        <div>{user?.email}</div>
+        <button onClick={logout}>Logout</button>
       </div>
 
+      {/* FILE TAB VIEW */}
+      {activeTab === "File" && (
+        <FileMenu
+          onNew={newDoc}
+          onOpen={openDoc}
+          onShare={shareDoc}
+          onSave={saveDoc}
+          onSaveAs={saveAsDoc}
+          onPrint={printDoc}
+          onExport={exportDoc}
+          onClose={closeEditor}
+        />
+      )}
+
+      {/* RIBBON */}
       <Ribbon
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onAction={onAction}
       />
 
+      {/* EDITOR */}
       <div style={styles.pageWrap}>
         <ReactQuill
           ref={quillRef}
@@ -77,15 +125,6 @@ const styles = {
     padding: 10,
     display: "flex",
     justifyContent: "space-between",
-  },
-  wallet: { fontSize: 12, opacity: 0.8 },
-  logout: {
-    background: "#ef4444",
-    border: "none",
-    color: "#fff",
-    padding: "6px 12px",
-    borderRadius: 4,
-    cursor: "pointer",
   },
   pageWrap: {
     padding: 20,
