@@ -2,19 +2,16 @@ import React, { useRef, useState } from "react";
 import ReactQuill, { Quill } from "react-quill";
 import ImageResize from "quill-image-resize-module-react";
 import "react-quill/dist/quill.snow.css";
-import api from "../utils/api";
-import htmlDocx from "html-docx-js/dist/html-docx";
-import { saveAs } from "file-saver";
+import Ribbon from "../components/Ribbon";
 import { useNavigate } from "react-router-dom";
 
 Quill.register("modules/imageResize", ImageResize);
 
 export default function Editor() {
-  const [content, setContent] = useState("");
-  const [title, setTitle] = useState("Untitled Document");
   const quillRef = useRef(null);
+  const [content, setContent] = useState("");
+  const [activeTab, setActiveTab] = useState("Home");
   const navigate = useNavigate();
-
   const user = JSON.parse(localStorage.getItem("user"));
 
   function logout() {
@@ -23,107 +20,83 @@ export default function Editor() {
     navigate("/login");
   }
 
-  async function saveDocument() {
-    const blob = htmlDocx.asBlob(`<h1>${title}</h1>${content}`);
-    const form = new FormData();
-    form.append("file", blob, `${title}.docx`);
-    await api.post("/api/doc/save", form);
-    alert("Document saved");
-  }
+  function onAction(action, value) {
+    const editor = quillRef.current.getEditor();
+    const range = editor.getSelection(true);
 
-  function downloadDoc() {
-    const blob = htmlDocx.asBlob(`<h1>${title}</h1>${content}`);
-    saveAs(blob, `${title}.docx`);
+    if (action === "image") {
+      const url = prompt("Image URL");
+      if (url) editor.insertEmbed(range.index, "image", url);
+      return;
+    }
+    if (action === "link") {
+      const url = prompt("Link URL");
+      if (url) editor.format("link", url);
+      return;
+    }
+    editor.format(action, value ?? true);
   }
-
-  const modules = {
-    toolbar: [
-      [{ header: [1, 2, 3, false] }],
-      ["bold", "italic", "underline"],
-      [{ list: "ordered" }, { list: "bullet" }],
-      [{ align: [] }],
-      ["link", "image"],
-      ["clean"],
-    ],
-    imageResize: {
-      modules: ["Resize", "DisplaySize", "Toolbar"],
-    },
-  };
 
   return (
-    <div style={styles.page}>
-      {/* HEADER */}
+    <div style={{ height: "100vh", background: "#e5e7eb" }}>
       <div style={styles.header}>
         <div>
           <strong>{user?.email}</strong>
           <div style={styles.wallet}>
             {user?.walletAddress
-              ? `Wallet: ${user.walletAddress.slice(0, 8)}...`
+              ? `Wallet: ${user.walletAddress.slice(0, 10)}...`
               : "No wallet"}
           </div>
         </div>
-        <button onClick={logout} style={styles.logoutBtn}>Logout</button>
+        <button onClick={logout} style={styles.logout}>Logout</button>
       </div>
 
-      {/* TITLE */}
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        style={styles.title}
+      <Ribbon
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onAction={onAction}
       />
 
-      {/* EDITOR */}
-      <ReactQuill
-        ref={quillRef}
-        value={content}
-        onChange={setContent}
-        modules={modules}
-        style={styles.editor}
-      />
-
-      {/* ACTIONS */}
-      <div style={styles.actions}>
-        <button onClick={saveDocument}>Save</button>
-        <button onClick={downloadDoc}>Download</button>
+      <div style={styles.pageWrap}>
+        <ReactQuill
+          ref={quillRef}
+          value={content}
+          onChange={setContent}
+          modules={{ toolbar: false, imageResize: {} }}
+          style={styles.editor}
+        />
       </div>
     </div>
   );
 }
 
 const styles = {
-  page: { padding: 20, fontFamily: "Segoe UI, sans-serif" },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
     background: "#0f172a",
     color: "#fff",
-    padding: 12,
-    borderRadius: 6,
-    marginBottom: 15,
+    padding: 10,
+    display: "flex",
+    justifyContent: "space-between",
   },
   wallet: { fontSize: 12, opacity: 0.8 },
-  logoutBtn: {
+  logout: {
     background: "#ef4444",
     border: "none",
     color: "#fff",
     padding: "6px 12px",
-    cursor: "pointer",
     borderRadius: 4,
+    cursor: "pointer",
   },
-  title: {
-    width: "100%",
-    fontSize: 22,
-    padding: 10,
-    marginBottom: 10,
+  pageWrap: {
+    padding: 20,
+    display: "flex",
+    justifyContent: "center",
   },
   editor: {
-    height: "65vh",
     background: "#fff",
-    borderRadius: 6,
-  },
-  actions: {
-    marginTop: 10,
-    display: "flex",
-    gap: 10,
+    width: "210mm",
+    minHeight: "297mm",
+    padding: 40,
+    boxShadow: "0 0 10px rgba(0,0,0,.15)",
   },
 };
