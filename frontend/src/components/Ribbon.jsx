@@ -1,5 +1,13 @@
 export default function Ribbon({ activeTab, setActiveTab }) {
-  const tabs = ["File", "Home", "Insert", "Layout", "View"];
+  const tabs = [
+    "File",
+    "Home",
+    "Insert",
+    "Layout",
+    "View",
+    "Sent",
+    "Inbox",
+  ];
 
   return (
     <div style={styles.wrapper}>
@@ -11,7 +19,7 @@ export default function Ribbon({ activeTab, setActiveTab }) {
             ...styles.tab,
             borderBottom:
               activeTab === tab ? "2px solid #2563eb" : "2px solid transparent",
-            fontWeight: activeTab === tab ? "600" : "400",
+            fontWeight: activeTab === tab ? 600 : 400,
           }}
         >
           {tab}

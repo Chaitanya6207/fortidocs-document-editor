@@ -14,7 +14,9 @@ app.use("/api/files", require("./routes/files"));
 app.use("/api/share", require("./routes/share"));
 app.use('/api/share', require('./routes/received')); 
 app.use("/api/doc", require("./routes/doc"));
-
+// 🔴 THIS LINE IS REQUIRED
+const shareRoutes = require("./routes/share");
+app.use("/api/share", shareRoutes);
 
 const PORT = process.env.PORT || 5000;
 

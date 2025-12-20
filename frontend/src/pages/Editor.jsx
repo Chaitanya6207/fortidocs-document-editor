@@ -8,15 +8,18 @@ import HomeRibbon from "../components/HomeRibbon";
 import FileRibbon from "../components/FileRibbon";
 import InsertRibbon from "../components/InsertRibbon";
 
+import Sent from "./Sent";
+import Inbox from "./Inbox";
+
 import { useNavigate } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
 import { saveAs } from "file-saver";
 
-/* ---------------- REGISTER MODULES ---------------- */
+/* ---------- REGISTER MODULES ---------- */
 
 Quill.register("modules/imageResize", ImageResize);
 
-/* -------- TEXTBOX (SHAPE) SUPPORT -------- */
+/* ---------- TEXTBOX (SHAPE) SUPPORT ---------- */
 
 const BlockEmbed = Quill.import("blots/block/embed");
 
@@ -49,7 +52,7 @@ export default function Editor() {
   const user = JSON.parse(localStorage.getItem("user"));
   const editor = quillRef.current?.getEditor();
 
-  /* ---------------- FILE ACTIONS ---------------- */
+  /* ---------- FILE ACTIONS ---------- */
 
   const newDoc = () => {
     if (window.confirm("Create new document? Unsaved changes will be lost.")) {
@@ -58,11 +61,11 @@ export default function Editor() {
   };
 
   const openDoc = () => {
-    alert("Open document – will be added next");
+    alert("Open document – coming next");
   };
 
   const saveDoc = () => {
-    alert("Save to backend/IPFS – already integrated earlier");
+    alert("Save to backend / IPFS – already integrated");
   };
 
   const saveAsDoc = () => {
@@ -84,7 +87,7 @@ export default function Editor() {
     navigate("/login");
   };
 
-  /* ---------------- RENDER ---------------- */
+  /* ================= RENDER ================= */
 
   return (
     <div style={{ height: "100vh", background: "#e5e7eb" }}>
@@ -101,7 +104,7 @@ export default function Editor() {
       {/* TOP TABS */}
       <Ribbon activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      {/* FILE TAB (HORIZONTAL) */}
+      {/* FILE TAB */}
       {activeTab === "File" && (
         <FileRibbon
           onNew={newDoc}
@@ -120,21 +123,29 @@ export default function Editor() {
       {/* INSERT TAB */}
       {activeTab === "Insert" && <InsertRibbon editor={editor} />}
 
-      {/* EDITOR PAGE */}
-      <div style={styles.pageWrap}>
-        <ReactQuill
-          ref={quillRef}
-          value={content}
-          onChange={setContent}
-          modules={{ toolbar: false, imageResize: {} }}
-          style={styles.editor}
-        />
-      </div>
+      {/* SENT DASHBOARD */}
+      {activeTab === "Sent" && <Sent />}
+
+      {/* INBOX DASHBOARD */}
+      {activeTab === "Inbox" && <Inbox />}
+
+      {/* DOCUMENT EDITOR (ONLY WHEN EDITING) */}
+      {["File", "Home", "Insert", "Layout", "View"].includes(activeTab) && (
+        <div style={styles.pageWrap}>
+          <ReactQuill
+            ref={quillRef}
+            value={content}
+            onChange={setContent}
+            modules={{ toolbar: false, imageResize: {} }}
+            style={styles.editor}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-/* ---------------- STYLES ---------------- */
+/* ================= STYLES ================= */
 
 const styles = {
   header: {
