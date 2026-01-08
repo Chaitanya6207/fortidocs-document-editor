@@ -80,7 +80,43 @@ export default function Editor() {
 
   const printDoc = () => window.print();
 
-  const shareDoc = () => navigate("/received");
+  const shareDoc = async () => {
+  const recipientEmail = prompt("Enter receiver email");
+  if (!recipientEmail) return;
+
+  try {
+    // 1️⃣ Save document to backend (HTML)
+    const res = await fetch("http://localhost:5000/api/doc/save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+      },
+      body: JSON.stringify({ content }),
+    });
+
+    const file = await res.json();
+
+    // 2️⃣ Share via blockchain
+    await fetch("http://localhost:5000/api/share", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+      },
+      body: JSON.stringify({
+        fileId: file._id,
+        recipientEmail,
+        permission: "VIEW",
+      }),
+    });
+
+    alert("File shared successfully via blockchain");
+  } catch (err) {
+    alert("Sharing failed");
+  }
+};
+
 
   const logout = () => {
     localStorage.clear();
