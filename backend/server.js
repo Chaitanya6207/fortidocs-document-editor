@@ -10,13 +10,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes); // existing
-app.use("/api/files", require("./routes/files"));
-app.use("/api/share", require("./routes/share"));
-app.use('/api/share', require('./routes/received')); 
+// app.use("/api/files", require("./routes/files"));
+// app.use("/api/share", require("./routes/share"));
+// app.use('/api/share', require('./routes/received')); 
 app.use("/api/doc", require("./routes/doc"));
-// 🔴 THIS LINE IS REQUIRED
+// // 🔴 THIS LINE IS REQUIRED
+// const shareRoutes = require("./routes/share");
+// app.use("/api/share", shareRoutes);
+
+// 🔥 FORCE LOAD SHARE ROUTES
 const shareRoutes = require("./routes/share");
 app.use("/api/share", shareRoutes);
+
+// TEST ROOT
+app.get("/", (req, res) => {
+  res.send("Backend running");
+});
 
 const PORT = process.env.PORT || 5000;
 

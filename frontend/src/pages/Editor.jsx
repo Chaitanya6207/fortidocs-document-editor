@@ -15,6 +15,8 @@ import { useNavigate } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
 import { saveAs } from "file-saver";
 
+import api from "../utils/api";
+
 /* ---------- REGISTER MODULES ---------- */
 
 Quill.register("modules/imageResize", ImageResize);
@@ -80,42 +82,33 @@ export default function Editor() {
 
   const printDoc = () => window.print();
 
-  const shareDoc = async () => {
+const shareDoc = async () => {
   const recipientEmail = prompt("Enter receiver email");
   if (!recipientEmail) return;
 
   try {
-    // 1️⃣ Save document to backend (HTML)
-    const res = await fetch("http://localhost:5000/api/doc/save", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-      body: JSON.stringify({ content }),
+    // 1️⃣ Save document first
+    const saveRes = await api.post("/api/doc/save", {
+      content,
     });
 
-    const file = await res.json();
+    const file = saveRes.data;
+    console.log("📄 FILE SAVED:", file);
 
-    // 2️⃣ Share via blockchain
-    await fetch("http://localhost:5000/api/share", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-      body: JSON.stringify({
-        fileId: file._id,
-        recipientEmail,
-        permission: "VIEW",
-      }),
+    // 2️⃣ Share document (🔥 SEND file._id)
+    await api.post("/api/share", {
+      fileId: file._id,   // 🔥 THIS WAS MISSING
+      recipientEmail: recipientEmail.toLowerCase(),
     });
 
-    alert("File shared successfully via blockchain");
+    alert("File shared successfully");
   } catch (err) {
-    alert("Sharing failed");
+    console.error("❌ SHARE ERROR:", err.response?.data || err);
+    alert("Share failed");
   }
 };
+
+
 
 
   const logout = () => {

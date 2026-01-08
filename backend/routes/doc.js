@@ -1,31 +1,38 @@
 const express = require("express");
-const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
-const auth = require("../middleware/auth");
-const Document = require("../models/Document");
-const { pinFileFromPath } = require("../services/pinata");
-
-const upload = multer({ dest: "uploads/" });
 const router = express.Router();
+const auth = require("../middleware/auth");
+const File = require("../models/File");
+const { pinJSONToIPFS } = require("../services/pinata");
 
-router.post("/save", auth, upload.single("file"), async (req, res) => {
+/**
+ * POST /api/doc/save
+ * Save editor content to IPFS and MongoDB
+ */
+router.post("/save", auth, async (req, res) => {
   try {
-    const result = await pinFileFromPath(
-      req.file.path,
-      req.file.originalname
-    );
+    const { content } = req.body;
+    if (!content) {
+      return res.status(400).json({ error: "Content is required" });
+    }
 
-    await Document.create({
-      ownerId: req.user.id,
-      filename: req.file.originalname,
-      cid: result.IpfsHash,
+    // 1️⃣ Upload to IPFS
+    const cid = await pinJSONToIPFS({
+      type: "document",
+      content,
+      createdAt: new Date(),
     });
 
-    fs.unlinkSync(req.file.path);
-    res.json({ ok: true });
+    // 2️⃣ Save File metadata (🔥 filename REQUIRED)
+    const file = await File.create({
+      filename: `Document-${Date.now()}.html`, // 🔥 REQUIRED FIELD
+      cid,
+      ownerId: req.user.id,
+    });
+
+    res.json(file);
   } catch (err) {
-    res.status(500).json({ error: "Save failed" });
+    console.error("❌ DOC SAVE ERROR:", err);
+    res.status(500).json({ error: "Failed to save document" });
   }
 });
 

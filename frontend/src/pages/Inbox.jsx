@@ -5,7 +5,9 @@ export default function Inbox() {
   const [files, setFiles] = useState([]);
 
   useEffect(() => {
-    api.get("/api/share/received").then((res) => setFiles(res.data));
+    api.get("/api/share/received")
+      .then((res) => setFiles(res.data))
+      .catch((err) => console.error(err));
   }, []);
 
   return (
