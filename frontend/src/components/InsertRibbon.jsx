@@ -6,16 +6,22 @@ export default function InsertRibbon({ editor }) {
 
   if (!editor) return null;
 
-  const getRange = () => editor.getSelection(true);
+  const getRange = () => {
+    const range = editor.getSelection(true);
+    return range || { index: editor.getLength() - 1, length: 0 };
+  };
 
   /* ---------- IMAGE ---------- */
   const insertImageUrl = () => {
+    const range = getRange();
     const url = prompt("Enter image URL:");
     if (!url) return;
-    editor.insertEmbed(getRange().index, "image", url);
+    editor.insertEmbed(range.index, "image", url, "user");
+    editor.setSelection(range.index + 1);
   };
 
   const insertImageFile = () => {
+    const range = getRange();
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -24,7 +30,9 @@ export default function InsertRibbon({ editor }) {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-        editor.insertEmbed(getRange().index, "image", ev.target.result);
+        editor.focus();
+        editor.insertEmbed(range.index, "image", ev.target.result, "user");
+        editor.setSelection(range.index + 1);
       };
       reader.readAsDataURL(file);
     };
@@ -33,72 +41,72 @@ export default function InsertRibbon({ editor }) {
 
   /* ---------- TABLE ---------- */
   const insertTable = () => {
+    const range = getRange();
     const rows = prompt("Number of rows?", "3");
     const cols = prompt("Number of columns?", "3");
     if (!rows || !cols) return;
     const r = parseInt(rows), c = parseInt(cols);
     if (isNaN(r) || isNaN(c) || r < 1 || c < 1) return;
 
-    let html = `<table border="1" style="border-collapse:collapse;width:100%;margin:12px 0;">`;
-    // Header row
-    html += "<thead><tr>";
+    let html = `<table><thead><tr>`;
     for (let j = 0; j < c; j++) {
-      html += `<th style="padding:10px 14px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:600;text-align:left;">Header ${j + 1}</th>`;
+      html += `<th>Header ${j + 1}</th>`;
     }
-    html += "</tr></thead><tbody>";
-    // Data rows
+    html += `</tr></thead><tbody>`;
     for (let i = 0; i < r - 1; i++) {
       html += "<tr>";
       for (let j = 0; j < c; j++) {
-        html += `<td style="padding:8px 14px;border:1px solid #cbd5e1;">Cell</td>`;
+        html += `<td>Cell</td>`;
       }
       html += "</tr>";
     }
-    html += "</tbody></table><br/>";
-    editor.clipboard.dangerouslyPasteHTML(getRange().index, html);
+    html += "</tbody></table>";
+    editor.insertEmbed(range.index, "tableEmbed", html, "user");
+    editor.setSelection(range.index + 1);
   };
 
   /* ---------- LINK ---------- */
   const insertLink = () => {
+    const range = getRange();
     const url = prompt("Enter URL:", "https://");
     if (!url) return;
     const text = prompt("Link text:", url);
     if (!text) return;
-    const range = getRange();
-    editor.insertText(range.index, text, "link", url);
+    editor.insertText(range.index, text, "link", url, "user");
   };
 
   /* ---------- HORIZONTAL RULE ---------- */
   const insertHR = () => {
-    editor.clipboard.dangerouslyPasteHTML(
-      getRange().index,
-      '<hr style="border:none;border-top:2px solid #e2e8f0;margin:16px 0;"/>'
-    );
+    const range = getRange();
+    editor.insertEmbed(range.index, "divider", true, "user");
+    editor.setSelection(range.index + 1);
   };
 
   /* ---------- TEXT BOX ---------- */
   const insertTextBox = () => {
-    editor.insertEmbed(getRange().index, "textBox", "Type here...");
+    const range = getRange();
+    editor.insertEmbed(range.index, "textBox", "Type here...", "user");
+    editor.setSelection(range.index + 1);
   };
 
   /* ---------- BLOCKQUOTE ---------- */
   const insertBlockquote = () => {
-    editor.clipboard.dangerouslyPasteHTML(
-      getRange().index,
-      '<blockquote style="border-left:4px solid #2563eb;padding:10px 16px;margin:12px 0;background:#f8fafc;color:#475569;font-style:italic;">Type your quote here...</blockquote><br/>'
-    );
+    const range = getRange();
+    editor.insertText(range.index, "Type your quote here...\n", "user");
+    editor.formatLine(range.index, 1, "blockquote", true);
   };
 
   /* ---------- CODE BLOCK ---------- */
   const insertCodeBlock = () => {
-    editor.clipboard.dangerouslyPasteHTML(
-      getRange().index,
-      '<pre style="background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;font-family:monospace;font-size:13px;margin:12px 0;overflow-x:auto;">// Your code here\nconsole.log("Hello World");</pre><br/>'
-    );
+    const range = getRange();
+    const code = '// Your code here\nconsole.log("Hello World");';
+    editor.insertText(range.index, code + "\n", "user");
+    editor.formatLine(range.index, code.length, "code-block", true);
   };
 
   /* ---------- DATE/TIME ---------- */
   const insertDateTime = () => {
+    const range = getRange();
     const now = new Date();
     const options = [
       now.toLocaleDateString(),
@@ -112,16 +120,15 @@ export default function InsertRibbon({ editor }) {
     );
     const idx = parseInt(choice) - 1;
     if (idx >= 0 && idx < options.length) {
-      editor.insertText(getRange().index, options[idx]);
+      editor.insertText(range.index, options[idx], "user");
     }
   };
 
   /* ---------- PAGE BREAK ---------- */
   const insertPageBreak = () => {
-    editor.clipboard.dangerouslyPasteHTML(
-      getRange().index,
-      '<hr style="page-break-after:always;border:none;border-top:2px dashed #94a3b8;margin:24px 0;"/>'
-    );
+    const range = getRange();
+    editor.insertEmbed(range.index, "pageBreak", true, "user");
+    editor.setSelection(range.index + 1);
   };
 
   /* ---------- SYMBOLS ---------- */
@@ -135,7 +142,8 @@ export default function InsertRibbon({ editor }) {
   ];
 
   const insertSymbol = (sym) => {
-    editor.insertText(getRange().index, sym);
+    const range = getRange();
+    editor.insertText(range.index, sym, "user");
     setShowSymbols(false);
   };
 
@@ -148,12 +156,15 @@ export default function InsertRibbon({ editor }) {
   ];
 
   const insertShape = (shape) => {
-    editor.clipboard.dangerouslyPasteHTML(getRange().index, shape.html + "<br/>");
+    const range = getRange();
+    editor.insertEmbed(range.index, "shapeEmbed", shape.html, "user");
+    editor.setSelection(range.index + 1);
     setShowShapes(false);
   };
 
   /* ---------- CALLOUT BOX ---------- */
   const insertCallout = () => {
+    const range = getRange();
     const types = {
       info: { bg: "#eff6ff", border: "#2563eb", icon: "ℹ️", title: "Info" },
       warning: { bg: "#fffbeb", border: "#f59e0b", icon: "⚠️", title: "Warning" },
@@ -162,10 +173,9 @@ export default function InsertRibbon({ editor }) {
     };
     const choice = prompt("Callout type: info, warning, success, error", "info");
     const t = types[choice] || types.info;
-    editor.clipboard.dangerouslyPasteHTML(
-      getRange().index,
-      `<div style="border-left:4px solid ${t.border};background:${t.bg};padding:12px 16px;margin:12px 0;border-radius:0 8px 8px 0;">${t.icon} <strong>${t.title}:</strong> Type your message here...</div><br/>`
-    );
+    const html = `<div style="border-left:4px solid ${t.border};background:${t.bg};padding:12px 16px;border-radius:0 8px 8px 0;">${t.icon} <strong>${t.title}:</strong> Type your message here...</div>`;
+    editor.insertEmbed(range.index, "calloutEmbed", html, "user");
+    editor.setSelection(range.index + 1);
   };
 
   /* ---------- ITEMS ---------- */

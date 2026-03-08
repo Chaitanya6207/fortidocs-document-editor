@@ -101,12 +101,12 @@ export default function HomeRibbon({ editor }) {
 
   const sizes = [
     { label: "8", value: "8px" },
-    { label: "10", value: "small" },
+    { label: "10", value: "10px" },
     { label: "12", value: "" },
     { label: "14", value: "14px" },
-    { label: "16", value: "large" },
+    { label: "16", value: "16px" },
     { label: "18", value: "18px" },
-    { label: "20", value: "huge" },
+    { label: "20", value: "20px" },
     { label: "24", value: "24px" },
     { label: "32", value: "32px" },
   ];
@@ -146,26 +146,26 @@ export default function HomeRibbon({ editor }) {
       {/* ===== FONT ===== */}
       <div style={styles.group}>
         <div style={styles.row}>
-          <select style={{ ...styles.select, minWidth: 120 }} onChange={(e) => fmt("font", e.target.value)}>
+          <select style={{ ...styles.select, minWidth: 120 }} onChange={(e) => fmt("font", e.target.value || false)}>
             {fonts.map((f) => (
               <option key={f.label} value={f.value} style={{ fontFamily: f.value || "inherit" }}>
                 {f.label}
               </option>
             ))}
           </select>
-          <select style={styles.select} onChange={(e) => fmt("size", e.target.value)}>
+          <select style={styles.select} onChange={(e) => fmt("size", e.target.value || false)}>
             {sizes.map((s) => (
               <option key={s.label} value={s.value}>{s.label}</option>
             ))}
           </select>
         </div>
         <div style={styles.row}>
-          <button style={styles.fmtBtn} onClick={() => fmt("bold")} title="Bold (Ctrl+B)"><b>B</b></button>
-          <button style={styles.fmtBtn} onClick={() => fmt("italic")} title="Italic (Ctrl+I)"><i>I</i></button>
-          <button style={styles.fmtBtn} onClick={() => fmt("underline")} title="Underline (Ctrl+U)"><u>U</u></button>
-          <button style={styles.fmtBtn} onClick={() => fmt("strike")} title="Strikethrough"><s>S</s></button>
-          <button style={{...styles.fmtBtn, fontSize: 11}} onClick={() => fmt("script", "sub")} title="Subscript">X₂</button>
-          <button style={{...styles.fmtBtn, fontSize: 11}} onClick={() => fmt("script", "super")} title="Superscript">X²</button>
+          <button style={styles.fmtBtn} onClick={() => fmt("bold", !getFmt("bold"))} title="Bold (Ctrl+B)"><b>B</b></button>
+          <button style={styles.fmtBtn} onClick={() => fmt("italic", !getFmt("italic"))} title="Italic (Ctrl+I)"><i>I</i></button>
+          <button style={styles.fmtBtn} onClick={() => fmt("underline", !getFmt("underline"))} title="Underline (Ctrl+U)"><u>U</u></button>
+          <button style={styles.fmtBtn} onClick={() => fmt("strike", !getFmt("strike"))} title="Strikethrough"><s>S</s></button>
+          <button style={{...styles.fmtBtn, fontSize: 11}} onClick={() => fmt("script", getFmt("script") === "sub" ? false : "sub")} title="Subscript">X₂</button>
+          <button style={{...styles.fmtBtn, fontSize: 11}} onClick={() => fmt("script", getFmt("script") === "super" ? false : "super")} title="Superscript">X²</button>
 
           {/* Font Color */}
           <div style={styles.dropWrap}>
@@ -234,8 +234,8 @@ export default function HomeRibbon({ editor }) {
           <button style={styles.fmtBtn} onClick={() => fmt("align", "justify")} title="Justify">☰</button>
         </div>
         <div style={styles.row}>
-          <button style={styles.fmtBtn} onClick={() => fmt("list", "ordered")} title="Numbered List">1.</button>
-          <button style={styles.fmtBtn} onClick={() => fmt("list", "bullet")} title="Bullet List">•</button>
+          <button style={styles.fmtBtn} onClick={() => fmt("list", getFmt("list") === "ordered" ? false : "ordered")} title="Numbered List">1.</button>
+          <button style={styles.fmtBtn} onClick={() => fmt("list", getFmt("list") === "bullet" ? false : "bullet")} title="Bullet List">•</button>
           <button style={styles.fmtBtn} onClick={() => editor.format("indent", "+1")} title="Increase Indent">⇥</button>
           <button style={styles.fmtBtn} onClick={() => editor.format("indent", "-1")} title="Decrease Indent">⇤</button>
 
@@ -273,8 +273,8 @@ export default function HomeRibbon({ editor }) {
         <div style={styles.row}>
           <button style={{ ...styles.styleBtn, fontWeight: 500, fontSize: 12 }} onClick={() => fmt("header", 4)}>H4</button>
           <button style={{ ...styles.styleBtn, fontWeight: 500, fontSize: 11 }} onClick={() => fmt("header", 5)}>H5</button>
-          <button style={{ ...styles.styleBtn, fontStyle: "italic", color: "#64748b" }} onClick={() => fmt("blockquote", true)}>Quote</button>
-          <button style={{ ...styles.styleBtn, fontFamily: "monospace", fontSize: 11 }} onClick={() => fmt("code-block", true)}>Code</button>
+          <button style={{ ...styles.styleBtn, fontStyle: "italic", color: "#64748b" }} onClick={() => fmt("blockquote", !getFmt("blockquote"))}>Quote</button>
+          <button style={{ ...styles.styleBtn, fontFamily: "monospace", fontSize: 11 }} onClick={() => fmt("code-block", !getFmt("code-block"))}>Code</button>
         </div>
         <div style={styles.label}>Styles</div>
       </div>

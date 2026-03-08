@@ -62,11 +62,9 @@ export default function LayoutRibbon({ editor, pageSettings, setPageSettings }) 
   ];
 
   const insertPageBreak = () => {
-    const range = editor.getSelection(true);
-    editor.clipboard.dangerouslyPasteHTML(
-      range.index,
-      '<hr style="page-break-after:always; border:none; border-top:2px dashed #ccc; margin:24px 0;"/>'
-    );
+    const range = editor.getSelection(true) || { index: editor.getLength() - 1, length: 0 };
+    editor.insertEmbed(range.index, "pageBreak", true, "user");
+    editor.setSelection(range.index + 1);
   };
 
   return (

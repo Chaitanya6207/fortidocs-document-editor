@@ -32,27 +32,119 @@ import {
 
 Quill.register("modules/imageResize", ImageResize);
 
-/* ---------- TEXTBOX (SHAPE) SUPPORT ---------- */
+/* ---------- CUSTOM ATTRIBUTORS (font, size, lineheight) ---------- */
+
+const Parchment = Quill.import("parchment");
+
+const FontStyle = new Parchment.Attributor.Style("font", "font-family", {
+  scope: Parchment.Scope.INLINE,
+});
+Quill.register(FontStyle, true);
+
+const SizeStyle = new Parchment.Attributor.Style("size", "font-size", {
+  scope: Parchment.Scope.INLINE,
+});
+Quill.register(SizeStyle, true);
+
+const LineHeightStyle = new Parchment.Attributor.Style("lineheight", "line-height", {
+  scope: Parchment.Scope.BLOCK,
+});
+Quill.register(LineHeightStyle, true);
+
+/* ---------- CUSTOM BLOTS ---------- */
 
 const BlockEmbed = Quill.import("blots/block/embed");
 
+/* Text Box */
 class TextBoxBlot extends BlockEmbed {
   static create(value) {
     const node = super.create();
-    node.innerText = value || "Text";
-    node.style.border = "1px solid #000";
-    node.style.padding = "8px";
-    node.style.minWidth = "120px";
-    node.style.display = "inline-block";
-    node.style.background = "#fff";
+    node.innerText = value || "Type here...";
+    return node;
+  }
+  static value(node) {
+    return node.innerText;
+  }
+}
+TextBoxBlot.blotName = "textBox";
+TextBoxBlot.tagName = "DIV";
+TextBoxBlot.className = "ql-text-box";
+Quill.register(TextBoxBlot);
+
+/* Divider (Horizontal Rule) */
+class DividerBlot extends BlockEmbed {
+  static create() {
+    const node = super.create();
     return node;
   }
 }
+DividerBlot.blotName = "divider";
+DividerBlot.tagName = "HR";
+DividerBlot.className = "ql-divider";
+Quill.register(DividerBlot);
 
-TextBoxBlot.blotName = "textBox";
-TextBoxBlot.tagName = "div";
+/* Page Break */
+class PageBreakBlot extends BlockEmbed {
+  static create() {
+    const node = super.create();
+    return node;
+  }
+}
+PageBreakBlot.blotName = "pageBreak";
+PageBreakBlot.tagName = "HR";
+PageBreakBlot.className = "ql-page-break";
+Quill.register(PageBreakBlot);
 
-Quill.register(TextBoxBlot);
+/* Table Embed */
+class TableEmbed extends BlockEmbed {
+  static create(value) {
+    const node = super.create();
+    node.setAttribute("contenteditable", "false");
+    node.innerHTML = value;
+    return node;
+  }
+  static value(node) {
+    return node.innerHTML;
+  }
+}
+TableEmbed.blotName = "tableEmbed";
+TableEmbed.tagName = "DIV";
+TableEmbed.className = "ql-table-embed";
+Quill.register(TableEmbed);
+
+/* Shape Embed */
+class ShapeEmbed extends BlockEmbed {
+  static create(value) {
+    const node = super.create();
+    node.setAttribute("contenteditable", "false");
+    node.innerHTML = value;
+    return node;
+  }
+  static value(node) {
+    return node.innerHTML;
+  }
+}
+ShapeEmbed.blotName = "shapeEmbed";
+ShapeEmbed.tagName = "DIV";
+ShapeEmbed.className = "ql-shape-embed";
+Quill.register(ShapeEmbed);
+
+/* Callout Embed */
+class CalloutEmbed extends BlockEmbed {
+  static create(value) {
+    const node = super.create();
+    node.setAttribute("contenteditable", "false");
+    node.innerHTML = value;
+    return node;
+  }
+  static value(node) {
+    return node.innerHTML;
+  }
+}
+CalloutEmbed.blotName = "calloutEmbed";
+CalloutEmbed.tagName = "DIV";
+CalloutEmbed.className = "ql-callout-embed";
+Quill.register(CalloutEmbed);
 
 /* ================= EDITOR ================= */
 
@@ -345,6 +437,59 @@ const shareDoc = async () => {
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#e5e7eb" }}>
+      <style>{`
+        .ql-text-box {
+          border: 2px solid #334155;
+          padding: 12px 16px;
+          min-width: 120px;
+          min-height: 40px;
+          display: inline-block;
+          background: #fff;
+          border-radius: 4px;
+          margin: 8px 0;
+          cursor: text;
+        }
+        .ql-divider {
+          border: none;
+          border-top: 2px solid #e2e8f0;
+          margin: 16px 0;
+        }
+        .ql-page-break {
+          border: none;
+          border-top: 2px dashed #94a3b8;
+          margin: 24px 0;
+          page-break-after: always;
+        }
+        .ql-table-embed {
+          margin: 12px 0;
+          line-height: normal;
+        }
+        .ql-table-embed table {
+          border-collapse: collapse;
+          width: 100%;
+        }
+        .ql-table-embed th {
+          padding: 10px 14px;
+          background: #f1f5f9;
+          border: 1px solid #cbd5e1;
+          font-weight: 600;
+          text-align: left;
+        }
+        .ql-table-embed td {
+          padding: 8px 14px;
+          border: 1px solid #cbd5e1;
+        }
+        .ql-table-embed tr:hover td {
+          background: #f8fafc;
+        }
+        .ql-shape-embed {
+          margin: 8px 0;
+          display: inline-block;
+        }
+        .ql-callout-embed {
+          margin: 12px 0;
+        }
+      `}</style>
       {/* HEADER */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
