@@ -10,21 +10,22 @@ const { pinJSONToIPFS } = require("../services/pinata");
  */
 router.post("/save", auth, async (req, res) => {
   try {
-    const { content } = req.body;
+    const { content, filename } = req.body;
     if (!content) {
       return res.status(400).json({ error: "Content is required" });
     }
 
-    // 1️⃣ Upload to IPFS
+    // 1. Upload to IPFS
     const cid = await pinJSONToIPFS({
       type: "document",
       content,
       createdAt: new Date(),
     });
 
-    // 2️⃣ Save File metadata (🔥 filename REQUIRED)
+    // 2. Save File metadata
+    const safeName = (filename || "").trim();
     const file = await File.create({
-      filename: `Document-${Date.now()}.html`, // 🔥 REQUIRED FIELD
+      filename: safeName ? `${safeName}.html` : `Document-${Date.now()}.html`,
       cid,
       ownerId: req.user.id,
     });

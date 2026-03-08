@@ -7,6 +7,8 @@ import Ribbon from "../components/Ribbon";
 import HomeRibbon from "../components/HomeRibbon";
 import FileRibbon from "../components/FileRibbon";
 import InsertRibbon from "../components/InsertRibbon";
+import LayoutRibbon from "../components/LayoutRibbon";
+import ViewRibbon from "../components/ViewRibbon";
 
 import Sent from "./Sent";
 import Inbox from "./Inbox";
@@ -49,35 +51,115 @@ export default function Editor() {
   const quillRef = useRef(null);
   const [content, setContent] = useState("");
   const [activeTab, setActiveTab] = useState("Home");
+  const [status, setStatus] = useState("");
+  const [docName, setDocName] = useState("");
+
+  /* ---------- LAYOUT & VIEW SETTINGS ---------- */
+  const [pageSettings, setPageSettings] = useState({
+    margin: "40px",
+    orientation: "portrait",
+    size: "A4",
+    width: "210mm",
+    height: "297mm",
+    columns: 1,
+    pageColor: "#ffffff",
+    pageBorder: "none",
+  });
+  const [viewSettings, setViewSettings] = useState({
+    zoom: 100,
+    viewMode: "print",
+    ruler: false,
+    gridlines: false,
+    darkMode: false,
+  });
+
   const navigate = useNavigate();
+
+  const askForName = (defaultName = "") => {
+    const name = prompt("Enter a name for your document:", defaultName);
+    if (name && name.trim()) {
+      setDocName(name.trim());
+      return name.trim();
+    }
+    return null;
+  };
 
   const user = JSON.parse(localStorage.getItem("user"));
   const editor = quillRef.current?.getEditor();
+
+  const showStatus = (msg, duration = 3000) => {
+    setStatus(msg);
+    setTimeout(() => setStatus(""), duration);
+  };
 
   /* ---------- FILE ACTIONS ---------- */
 
   const newDoc = () => {
     if (window.confirm("Create new document? Unsaved changes will be lost.")) {
       setContent("");
+      setDocName("");
+      showStatus("New document created");
     }
   };
 
   const openDoc = () => {
-    alert("Open document – coming next");
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".html,.htm,.txt";
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setContent(ev.target.result);
+        const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
+        setDocName(nameWithoutExt);
+        showStatus(`Opened: ${file.name}`);
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   };
 
-  const saveDoc = () => {
-    alert("Save to backend / IPFS – already integrated");
+  const saveDoc = async () => {
+    if (!content || content === "<p><br></p>") {
+      showStatus("Nothing to save — document is empty");
+      return;
+    }
+
+    let name = docName;
+    if (!name) {
+      name = askForName();
+      if (!name) {
+        showStatus("Save cancelled — no filename provided");
+        return;
+      }
+    }
+
+    try {
+      showStatus("Saving to IPFS…");
+      const res = await api.post("/api/doc/save", { content, filename: name });
+      showStatus(`Saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
+    } catch (err) {
+      console.error("Save error:", err);
+      showStatus("Save failed");
+    }
   };
 
   const saveAsDoc = () => {
+    const name = askForName(docName || "document");
+    if (!name) {
+      showStatus("Save As cancelled — no filename provided");
+      return;
+    }
     const blob = htmlDocx.asBlob(content);
-    saveAs(blob, "document.docx");
+    saveAs(blob, `${name}.docx`);
   };
 
   const exportDoc = () => {
+    const name = docName || "exported-document";
     const blob = htmlDocx.asBlob(content);
-    saveAs(blob, "exported-document.docx");
+    saveAs(blob, `${name}.docx`);
   };
 
   const printDoc = () => window.print();
@@ -86,25 +168,37 @@ const shareDoc = async () => {
   const recipientEmail = prompt("Enter receiver email");
   if (!recipientEmail) return;
 
+  if (!content || content === "<p><br></p>") {
+    showStatus("Cannot share an empty document");
+    return;
+  }
+
   try {
-    // 1️⃣ Save document first
-    const saveRes = await api.post("/api/doc/save", {
-      content,
-    });
+    let name = docName;
+    if (!name) {
+      name = askForName();
+      if (!name) {
+        showStatus("Share cancelled — no filename provided");
+        return;
+      }
+    }
 
+    showStatus("Saving & sharing…");
+
+    // 1. Save document first
+    const saveRes = await api.post("/api/doc/save", { content, filename: name });
     const file = saveRes.data;
-    console.log("📄 FILE SAVED:", file);
 
-    // 2️⃣ Share document (🔥 SEND file._id)
+    // 2. Share document
     await api.post("/api/share", {
-      fileId: file._id,   // 🔥 THIS WAS MISSING
+      fileId: file._id,
       recipientEmail: recipientEmail.toLowerCase(),
     });
 
-    alert("File shared successfully");
+    showStatus(`Shared with ${recipientEmail}`);
   } catch (err) {
-    console.error("❌ SHARE ERROR:", err.response?.data || err);
-    alert("Share failed");
+    console.error("Share error:", err.response?.data || err);
+    showStatus("Share failed");
   }
 };
 
@@ -119,15 +213,23 @@ const shareDoc = async () => {
   /* ================= RENDER ================= */
 
   return (
-    <div style={{ height: "100vh", background: "#e5e7eb" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#e5e7eb" }}>
       {/* HEADER */}
       <div style={styles.header}>
-        <div>
-          <strong>{user?.email}</strong>
+        <div style={styles.headerLeft}>
+          <span style={styles.logo}>FortiDocs</span>
+          <span style={styles.headerDivider}>|</span>
+          <span style={styles.userName}>{docName || "Untitled Document"}</span>
         </div>
-        <button onClick={logout} style={styles.logout}>
-          Logout
-        </button>
+        {status && (
+          <div style={styles.statusBadge}>{status}</div>
+        )}
+        <div style={styles.headerRight}>
+          <span style={styles.userBadge}>👤 {user?.name || user?.email || "User"}</span>
+          <button onClick={logout} className="btn btn-danger btn-sm">
+            Logout
+          </button>
+        </div>
       </div>
 
       {/* TOP TABS */}
@@ -152,6 +254,24 @@ const shareDoc = async () => {
       {/* INSERT TAB */}
       {activeTab === "Insert" && <InsertRibbon editor={editor} />}
 
+      {/* LAYOUT TAB */}
+      {activeTab === "Layout" && (
+        <LayoutRibbon
+          editor={editor}
+          pageSettings={pageSettings}
+          setPageSettings={setPageSettings}
+        />
+      )}
+
+      {/* VIEW TAB */}
+      {activeTab === "View" && (
+        <ViewRibbon
+          editor={editor}
+          viewSettings={viewSettings}
+          setViewSettings={setViewSettings}
+        />
+      )}
+
       {/* SENT DASHBOARD */}
       {activeTab === "Sent" && <Sent />}
 
@@ -160,14 +280,72 @@ const shareDoc = async () => {
 
       {/* DOCUMENT EDITOR (ONLY WHEN EDITING) */}
       {["File", "Home", "Insert", "Layout", "View"].includes(activeTab) && (
-        <div style={styles.pageWrap}>
-          <ReactQuill
-            ref={quillRef}
-            value={content}
-            onChange={setContent}
-            modules={{ toolbar: false, imageResize: {} }}
-            style={styles.editor}
-          />
+        <div
+          style={{
+            ...styles.pageWrap,
+            ...(viewSettings.darkMode
+              ? { background: "#1e293b" }
+              : {}),
+          }}
+        >
+          {/* Ruler */}
+          {viewSettings.ruler && (
+            <div style={styles.ruler}>
+              {Array.from({ length: 21 }, (_, i) => (
+                <div key={i} style={styles.rulerTick}>
+                  <span style={styles.rulerNum}>{i}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div
+            style={{
+              ...styles.editorWrap,
+              width:
+                viewSettings.viewMode === "web" ? "100%" :
+                pageSettings.orientation === "landscape"
+                  ? pageSettings.height
+                  : pageSettings.width,
+              minHeight:
+                viewSettings.viewMode === "web" ? "auto" :
+                pageSettings.orientation === "landscape"
+                  ? pageSettings.width
+                  : pageSettings.height,
+              background: pageSettings.pageColor,
+              border: pageSettings.pageBorder,
+              transform: `scale(${viewSettings.zoom / 100})`,
+              transformOrigin: "top center",
+              columnCount: pageSettings.columns,
+              columnGap: pageSettings.columns > 1 ? "24px" : "0",
+              ...(viewSettings.gridlines
+                ? {
+                    backgroundImage:
+                      "linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px)",
+                    backgroundSize: "20px 20px",
+                  }
+                : {}),
+              ...(viewSettings.viewMode === "focus"
+                ? {
+                    maxWidth: 700,
+                    boxShadow: "none",
+                    border: "none",
+                  }
+                : {}),
+            }}
+          >
+            <ReactQuill
+              ref={quillRef}
+              value={content}
+              onChange={setContent}
+              modules={{ toolbar: false, imageResize: {} }}
+              style={{
+                background: "transparent",
+                padding: pageSettings.margin,
+                minHeight: "100%",
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -178,31 +356,94 @@ const shareDoc = async () => {
 
 const styles = {
   header: {
-    background: "#0f172a",
+    background: "linear-gradient(90deg, #0f172a, #1e293b)",
     color: "#fff",
-    padding: "8px 14px",
+    padding: "10px 20px",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
   },
-  logout: {
-    background: "#ef4444",
-    border: "none",
-    color: "#fff",
-    padding: "6px 12px",
-    cursor: "pointer",
-    borderRadius: 4,
+  headerLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  logo: {
+    fontSize: 18,
+    fontWeight: 800,
+    letterSpacing: "-0.02em",
+    background: "linear-gradient(135deg, #60a5fa, #a78bfa)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+  headerDivider: {
+    color: "#475569",
+    fontSize: 18,
+  },
+  userName: {
+    fontSize: 13,
+    color: "#94a3b8",
+    fontWeight: 500,
+  },
+  statusBadge: {
+    background: "rgba(37, 99, 235, 0.15)",
+    color: "#93c5fd",
+    padding: "5px 14px",
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: 500,
+  },
+  headerRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  userBadge: {
+    background: "rgba(255, 255, 255, 0.1)",
+    color: "#cbd5e1",
+    padding: "5px 12px",
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: 500,
   },
   pageWrap: {
-    padding: 20,
+    flex: 1,
+    padding: 24,
     display: "flex",
-    justifyContent: "center",
+    flexDirection: "column",
+    alignItems: "center",
+    overflowY: "auto",
+    transition: "background 0.3s ease",
   },
-  editor: {
+  editorWrap: {
     background: "#fff",
-    width: "210mm",        // A4 width
-    minHeight: "297mm",   // A4 height
-    padding: 40,
-    boxShadow: "0 0 10px rgba(0,0,0,.15)",
+    boxShadow: "0 2px 16px rgba(0,0,0,0.08)",
+    borderRadius: 4,
+    transition: "all 0.3s ease",
+  },
+  ruler: {
+    display: "flex",
+    justifyContent: "space-between",
+    width: "210mm",
+    padding: "0 40px",
+    marginBottom: 4,
+    height: 20,
+    background: "#f1f5f9",
+    borderRadius: "4px 4px 0 0",
+    border: "1px solid #e2e8f0",
+    borderBottom: "none",
+    overflow: "hidden",
+  },
+  rulerTick: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    position: "relative",
+  },
+  rulerNum: {
+    fontSize: 8,
+    color: "#94a3b8",
+    fontWeight: 500,
   },
 };

@@ -1,30 +1,32 @@
 export default function Ribbon({ activeTab, setActiveTab }) {
   const tabs = [
-    "File",
-    "Home",
-    "Insert",
-    "Layout",
-    "View",
-    "Sent",
-    "Inbox",
+    { key: "File", icon: "📁" },
+    { key: "Home", icon: "🏠" },
+    { key: "Insert", icon: "➕" },
+    { key: "Layout", icon: "📐" },
+    { key: "View", icon: "👁" },
+    { key: "Sent", icon: "📤" },
+    { key: "Inbox", icon: "📥" },
   ];
 
   return (
     <div style={styles.wrapper}>
-      {tabs.map((tab) => (
-        <button
-          key={tab}
-          onClick={() => setActiveTab(tab)}
-          style={{
-            ...styles.tab,
-            borderBottom:
-              activeTab === tab ? "2px solid #2563eb" : "2px solid transparent",
-            fontWeight: activeTab === tab ? 600 : 400,
-          }}
-        >
-          {tab}
-        </button>
-      ))}
+      {tabs.map(({ key, icon }) => {
+        const isActive = activeTab === key;
+        return (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            style={{
+              ...styles.tab,
+              ...(isActive ? styles.tabActive : {}),
+            }}
+          >
+            <span style={styles.tabIcon}>{icon}</span>
+            {key}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -32,16 +34,32 @@ export default function Ribbon({ activeTab, setActiveTab }) {
 const styles = {
   wrapper: {
     display: "flex",
-    gap: 20,
-    padding: "6px 14px",
-    background: "#ffffff",
-    borderBottom: "1px solid #cbd5e1",
+    gap: 2,
+    padding: "0 12px",
+    background: "#fff",
+    borderBottom: "1px solid #e2e8f0",
   },
   tab: {
     background: "none",
     border: "none",
     cursor: "pointer",
-    padding: "6px 4px",
+    padding: "10px 14px",
+    fontSize: 13,
+    fontWeight: 500,
+    color: "#64748b",
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    borderBottom: "2px solid transparent",
+    transition: "all 0.15s ease",
+  },
+  tabActive: {
+    color: "#2563eb",
+    fontWeight: 600,
+    borderBottom: "2px solid #2563eb",
+    background: "#eff6ff",
+  },
+  tabIcon: {
     fontSize: 14,
   },
 };

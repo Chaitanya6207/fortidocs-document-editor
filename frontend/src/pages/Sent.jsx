@@ -1,89 +1,137 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 
 export default function Sent() {
   const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchSent();
   }, []);
 
   async function fetchSent() {
-    setLoading(true);
     try {
       const res = await api.get("/api/share/sent");
       setFiles(res.data || []);
     } catch (err) {
       console.error("fetchSent error", err);
-      alert("Failed to load sent files");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Sent Files</h2>
+    <div style={styles.container} className="fade-in">
+      <div style={styles.titleRow}>
+        <h2 style={styles.title}>📤 Sent Files</h2>
+        <span style={styles.count}>{files.length} file{files.length !== 1 ? "s" : ""}</span>
+      </div>
 
-      {loading && <div>Loading...</div>}
+      {loading && (
+        <div style={styles.center}><div className="spinner" /></div>
+      )}
+
       {!loading && files.length === 0 && (
-        <div>No files sent yet.</div>
+        <div className="empty-state">
+          <div className="icon">📭</div>
+          <p>No files sent yet</p>
+        </div>
       )}
 
       {!loading && files.length > 0 && (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th align="left">File</th>
-              <th align="left">Receiver</th>
-              <th align="left">Date</th>
-              <th align="left">IPFS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {files.map((f) => {
-              const cid = f.fileId?.cid;
-              const gatewayUrl = cid
-                ? `https://gateway.pinata.cloud/ipfs/${cid}`
-                : "#";
+        <div className="card" style={styles.tableWrap}>
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Receiver</th>
+                <th>Shared On</th>
+                <th style={{ textAlign: "right" }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((f) => {
+                const cid = f.fileId?.cid;
+                const filename = f.fileId?.filename || "Unknown";
+                const hasCid = cid && cid !== "undefined";
 
-              return (
-                <tr key={f._id}>
-                  <td>{f.fileId?.filename || "Unknown"}</td>
-                  <td>{f.recipientEmail}</td>
-                  <td>
-                    {f.createdAt
-                      ? new Date(f.createdAt).toLocaleString()
-                      : "-"}
-                  </td>
-                  <td>
-                    {cid ? (
-                      <a
-                        href={gatewayUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      "N/A"
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                return (
+                  <tr key={f._id}>
+                    <td style={styles.fileCell}>
+                      <span style={styles.fileIcon}>📄</span>
+                      {filename}
+                    </td>
+                    <td>{f.recipientEmail}</td>
+                    <td>
+                      {f.createdAt
+                        ? new Date(f.createdAt).toLocaleString()
+                        : "-"}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {hasCid ? (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() =>
+                            navigate(
+                              `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`
+                            )
+                          }
+                        >
+                          Open
+                        </button>
+                      ) : (
+                        <span style={{ color: "#dc2626", fontSize: 12 }}>N/A</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
 }
 
 const styles = {
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    marginTop: 12,
+  container: { padding: "20px 24px" },
+  titleRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 700,
+    color: "#0f172a",
+    margin: 0,
+  },
+  count: {
+    fontSize: 13,
+    color: "#64748b",
+    background: "#f1f5f9",
+    padding: "4px 12px",
+    borderRadius: 20,
+  },
+  center: {
+    display: "flex",
+    justifyContent: "center",
+    padding: 40,
+  },
+  tableWrap: {
+    overflow: "hidden",
+  },
+  fileCell: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontWeight: 500,
+  },
+  fileIcon: {
+    fontSize: 18,
   },
 };

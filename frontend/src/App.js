@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Editor from './pages/Editor';
 import Received from './pages/Received';
+import Viewer from './pages/Viewer';
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
       <Route path="/register" element={<Register />} />
       <Route path="/editor" element={<Editor />} />
       <Route path="/received" element={<Received />} />
+      <Route path="/viewer" element={<Viewer />} />
     </Routes>
   );
 }

@@ -46,17 +46,53 @@ router.post("/", auth, async (req, res) => {
 
 // SENT
 router.get("/sent", auth, async (req, res) => {
-  const sent = await FileAccess.find({ ownerId: req.user.id }).populate("fileId");
-  res.json(sent);
+  try {
+    const sent = await FileAccess.find({ ownerId: req.user.id })
+      .populate("fileId")
+      .sort({ createdAt: -1 });
+
+    // Filter out entries whose File was deleted
+    const valid = sent.filter((s) => s.fileId != null);
+
+    // Clean up orphaned access records in the background
+    const orphanIds = sent.filter((s) => s.fileId == null).map((s) => s._id);
+    if (orphanIds.length) {
+      FileAccess.deleteMany({ _id: { $in: orphanIds } }).catch(() => {});
+    }
+
+    res.json(valid);
+  } catch (err) {
+    console.error("GET /api/share/sent error:", err);
+    res.status(500).json({ error: "Failed to load sent files" });
+  }
 });
 
 // RECEIVED
 router.get("/received", auth, async (req, res) => {
-  const received = await FileAccess.find({
-    recipientEmail: req.user.email,
-  }).populate("fileId");
+  try {
+    const userEmail = (req.user.email || "").trim().toLowerCase();
 
-  res.json(received);
+    const received = await FileAccess.find({
+      recipientEmail: userEmail,
+    })
+      .populate("fileId")
+      .populate("ownerId", "name email")
+      .sort({ createdAt: -1 });
+
+    // Filter out entries whose File was deleted from DB
+    const valid = received.filter((r) => r.fileId != null);
+
+    // Clean up orphaned access records in the background
+    const orphanIds = received.filter((r) => r.fileId == null).map((r) => r._id);
+    if (orphanIds.length) {
+      FileAccess.deleteMany({ _id: { $in: orphanIds } }).catch(() => {});
+    }
+
+    res.json(valid);
+  } catch (err) {
+    console.error("GET /api/share/received error:", err);
+    res.status(500).json({ error: "Failed to load received files" });
+  }
 });
 
 module.exports = router;
