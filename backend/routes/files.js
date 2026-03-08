@@ -66,4 +66,43 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
+// DELETE /api/files/:id - delete a file + related FileAccess and ActivityLog records
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    console.log('🗑️ DELETE request for file:', req.params.id, 'by user:', req.user.id);
+
+    const file = await File.findById(req.params.id);
+    if (!file) {
+      console.log('❌ File not found:', req.params.id);
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    console.log('📄 File found:', file.filename, 'ownerId:', file.ownerId.toString(), 'userId:', req.user.id);
+
+    // Only the owner can delete
+    if (String(file.ownerId) !== String(req.user.id)) {
+      console.log('🚫 Not authorized. Owner:', String(file.ownerId), 'User:', String(req.user.id));
+      return res.status(403).json({ error: 'Not authorized to delete this file' });
+    }
+
+    const FileAccess = require('../models/FileAccess');
+    const ActivityLog = require('../models/ActivityLog');
+
+    // Remove related records
+    const accessResult = await FileAccess.deleteMany({ fileId: file._id });
+    console.log('🔗 Deleted FileAccess records:', accessResult.deletedCount);
+
+    const logResult = await ActivityLog.deleteMany({ fileId: file._id });
+    console.log('📋 Deleted ActivityLog records:', logResult.deletedCount);
+
+    await File.findByIdAndDelete(file._id);
+    console.log('✅ File deleted successfully:', file.filename);
+
+    res.json({ message: 'File deleted successfully' });
+  } catch (err) {
+    console.error('DELETE /api/files/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete file', details: err.message });
+  }
+});
+
 module.exports = router;

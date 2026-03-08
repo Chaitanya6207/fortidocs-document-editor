@@ -59,8 +59,23 @@ export default function MyFiles() {
     }
   };
 
-  const openInViewer = (cid, filename) => {
-    window.open(`/viewer?cid=${cid}&filename=${encodeURIComponent(filename)}`, "_blank");
+  const openInViewer = (cid, filename, encryptedKey) => {
+    let url = `/viewer?cid=${cid}&filename=${encodeURIComponent(filename)}`;
+    if (encryptedKey) url += `&encryptedKey=${encodeURIComponent(encryptedKey)}`;
+    window.open(url, "_blank");
+  };
+
+  const deleteFile = async (fileId, filename) => {
+    if (!window.confirm(`Delete "${filename}"?\nThis will also remove all shares and activity logs for this file.`)) return;
+    try {
+      const res = await api.delete(`/api/files/${fileId}`);
+      console.log("Delete response:", res.data);
+      setFiles((prev) => prev.filter((f) => f._id !== fileId));
+      if (expandedFile === fileId) setExpandedFile(null);
+    } catch (err) {
+      console.error("Delete failed:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "Failed to delete file");
+    }
   };
 
   const formatDate = (d) => {
@@ -157,7 +172,7 @@ export default function MyFiles() {
                   {file.cid && (
                     <button
                       style={styles.actionBtn}
-                      onClick={() => openInViewer(file.cid, file.filename)}
+                      onClick={() => openInViewer(file.cid, file.filename, file.encryptedKey)}
                       title="Open in Viewer"
                     >
                       👁 View
@@ -172,6 +187,13 @@ export default function MyFiles() {
                     title="View Activity Logs"
                   >
                     📋 {isExpanded ? "Hide Logs" : "Logs"}
+                  </button>
+                  <button
+                    style={styles.deleteBtn}
+                    onClick={() => deleteFile(file._id, file.filename)}
+                    title="Delete File"
+                  >
+                    🗑️ Delete
                   </button>
                 </div>
               </div>
@@ -387,6 +409,18 @@ const styles = {
     background: "#eff6ff",
     borderColor: "#2563eb",
     color: "#2563eb",
+  },
+  deleteBtn: {
+    padding: "6px 12px",
+    border: "1px solid #fecaca",
+    borderRadius: 6,
+    background: "#fef2f2",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 500,
+    color: "#dc2626",
+    transition: "all 0.15s ease",
+    whiteSpace: "nowrap",
   },
   /* --- LOGS PANEL --- */
   logsPanel: {

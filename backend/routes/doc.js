@@ -8,11 +8,13 @@ const { pinJSONToIPFS } = require("../services/pinata");
 /**
  * POST /api/doc/save
  * Save editor content to IPFS and MongoDB
- * Body: { content, filename, target: "cloud" | "local" }
+ * Body: { content, filename, target: "cloud" | "local", encryptedKey? }
+ * - content: already-encrypted ciphertext (if encrypted) or plain HTML
+ * - encryptedKey: JSON string of wallet-encrypted AES key (for cloud saves)
  */
 router.post("/save", auth, async (req, res) => {
   try {
-    const { content, filename, target = "cloud" } = req.body;
+    const { content, filename, target = "cloud", encryptedKey } = req.body;
     if (!content) {
       return res.status(400).json({ error: "Content is required" });
     }
@@ -30,16 +32,28 @@ router.post("/save", auth, async (req, res) => {
     }
 
     // --- CLOUD SAVE (upload to IPFS + persist in MongoDB) ---
-    const cid = await pinJSONToIPFS({
-      type: "document",
-      content,
-      createdAt: new Date(),
-    });
+    const isEncrypted = !!encryptedKey;
+
+    const ipfsPayload = isEncrypted
+      ? {
+          type: "encrypted-document",
+          encryptedContent: content,
+          createdAt: new Date(),
+        }
+      : {
+          type: "document",
+          content,
+          createdAt: new Date(),
+        };
+
+    const cid = await pinJSONToIPFS(ipfsPayload);
 
     const file = await File.create({
       filename: `${docName}.html`,
       cid,
       ownerId: req.user.id,
+      encrypted: isEncrypted,
+      encryptedKey: encryptedKey || "",
     });
 
     // Log the activity
@@ -47,7 +61,7 @@ router.post("/save", auth, async (req, res) => {
       fileId: file._id,
       userId: req.user.id,
       action: "SAVED_CLOUD",
-      details: `Saved "${docName}" to IPFS (CID: ${cid})`,
+      details: `Saved "${docName}" to IPFS (CID: ${cid})${isEncrypted ? " [encrypted]" : ""}`,
     });
 
     res.json(file);

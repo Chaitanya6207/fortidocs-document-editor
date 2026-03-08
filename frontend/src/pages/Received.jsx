@@ -64,6 +64,7 @@ export default function Received() {
                 const filename = file?.filename || "Unknown file";
                 const senderName = item?.ownerId?.name || item?.ownerId?.email || "-";
                 const hasCid = cid && cid !== "undefined";
+                const encKey = item?.encryptedKey || "";
 
                 return (
                   <tr key={item._id}>
@@ -87,11 +88,11 @@ export default function Received() {
                         <div style={styles.actions}>
                           <button
                             className="btn btn-primary btn-sm"
-                            onClick={() =>
-                              navigate(
-                                `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`
-                              )
-                            }
+                            onClick={() => {
+                              let url = `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`;
+                              if (encKey) url += `&encryptedKey=${encodeURIComponent(encKey)}`;
+                              navigate(url);
+                            }}
                           >
                             Open
                           </button>

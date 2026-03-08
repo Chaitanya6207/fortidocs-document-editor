@@ -8,6 +8,8 @@ const fileSchema = new mongoose.Schema({
   cid: { type: String, required: true },
   mimeType: { type: String },
   size: { type: Number },
+  encrypted: { type: Boolean, default: false },
+  encryptedKey: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now }
 });
 

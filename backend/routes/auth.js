@@ -14,7 +14,7 @@ const router = express.Router();
  */
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, walletAddress } = req.body;
+    const { name, email, password, walletAddress, encryptionPublicKey } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: "Missing fields" });
     }
@@ -32,6 +32,7 @@ router.post("/register", async (req, res) => {
       email,
       passwordHash,
       walletAddress: walletAddress || "",
+      encryptionPublicKey: encryptionPublicKey || "",
       nonce,
     });
 
@@ -66,6 +67,7 @@ router.post("/login", async (req, res) => {
         name: user.name,
         email: user.email,
         walletAddress: user.walletAddress,
+        encryptionPublicKey: user.encryptionPublicKey || "",
       },
     });
   } catch (err) {
@@ -188,6 +190,7 @@ router.post("/login-verify", async (req, res) => {
         name: user.name,
         email: user.email,
         walletAddress: user.walletAddress,
+        encryptionPublicKey: user.encryptionPublicKey || "",
       },
     });
   } catch (err) {

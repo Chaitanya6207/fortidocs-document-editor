@@ -14,6 +14,7 @@ app.use("/api/doc", require("./routes/doc"));
 app.use("/api/files", require("./routes/files"));
 app.use("/api/share", require("./routes/share"));
 app.use("/api/logs", require("./routes/logs"));
+app.use("/api/keys", require("./routes/keys"));
 
 const PORT = process.env.PORT || 5000;
 

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../utils/api";
+import { getEncryptionPublicKey } from "../utils/crypto";
 
 function Register() {
   const [name, setName] = useState("");
@@ -8,6 +9,7 @@ function Register() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
+  const [encPubKey, setEncPubKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -28,6 +30,14 @@ function Register() {
       }
       setWalletAddress(accounts[0]);
       setError("");
+
+      // Get encryption public key from MetaMask
+      try {
+        const pubKey = await getEncryptionPublicKey(accounts[0]);
+        setEncPubKey(pubKey);
+      } catch (keyErr) {
+        console.warn("Could not get encryption key:", keyErr);
+      }
     } catch (err) {
       console.error("MetaMask connection failed:", err);
       setError("Failed to connect wallet.");
@@ -50,7 +60,7 @@ function Register() {
     setLoading(true);
     try {
       await api.post("/api/auth/register", {
-        name, email, password, walletAddress,
+        name, email, password, walletAddress, encryptionPublicKey: encPubKey,
       });
       navigate("/login");
     } catch (err) {

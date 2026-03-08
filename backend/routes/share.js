@@ -18,7 +18,7 @@ router.post("/", auth, async (req, res) => {
     console.log("📩 SHARE BODY:", req.body);
     console.log("👤 USER:", req.user);
 
-    const { fileId, recipientEmail } = req.body;
+    const { fileId, recipientEmail, encryptedKey } = req.body;
 
     if (!fileId || !recipientEmail) {
       return res.status(400).json({ error: "Missing fileId or recipientEmail" });
@@ -34,6 +34,7 @@ router.post("/", auth, async (req, res) => {
       ownerId: req.user.id,
       recipientEmail: recipientEmail.trim().toLowerCase(),
       permission: "VIEW",
+      encryptedKey: encryptedKey || "",
     });
 
     console.log("✅ FileAccess created:", access);
@@ -43,7 +44,7 @@ router.post("/", auth, async (req, res) => {
       fileId: file._id,
       userId: req.user.id,
       action: "SHARED",
-      details: `Shared with ${recipientEmail.trim().toLowerCase()}`,
+      details: `Shared with ${recipientEmail.trim().toLowerCase()}${encryptedKey ? " [encrypted]" : ""}`,
     });
 
     res.json(access);
@@ -73,6 +74,34 @@ router.get("/sent", auth, async (req, res) => {
   } catch (err) {
     console.error("GET /api/share/sent error:", err);
     res.status(500).json({ error: "Failed to load sent files" });
+  }
+});
+
+// DELETE /api/share/:id - revoke a sent share (delete FileAccess record)
+router.delete("/:id", auth, async (req, res) => {
+  try {
+    const access = await FileAccess.findById(req.params.id);
+    if (!access) return res.status(404).json({ error: "Share record not found" });
+
+    // Only the owner who shared can revoke
+    if (access.ownerId.toString() !== req.user.id) {
+      return res.status(403).json({ error: "Not authorized to revoke this share" });
+    }
+
+    await FileAccess.findByIdAndDelete(access._id);
+
+    // Log the revoke action
+    await ActivityLog.create({
+      fileId: access.fileId,
+      userId: req.user.id,
+      action: "DELETED",
+      details: `Revoked share to ${access.recipientEmail}`,
+    });
+
+    res.json({ message: "Share revoked successfully" });
+  } catch (err) {
+    console.error("DELETE /api/share/:id error:", err);
+    res.status(500).json({ error: "Failed to revoke share" });
   }
 });
 

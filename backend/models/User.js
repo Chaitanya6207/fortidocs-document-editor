@@ -6,7 +6,8 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   walletAddress: { type: String, default: "" },
-  nonce: { type: String, default: "" }
+  nonce: { type: String, default: "" },
+  encryptionPublicKey: { type: String, default: "" },
 }, { timestamps: true });
 
 module.exports = mongoose.model("User", userSchema);

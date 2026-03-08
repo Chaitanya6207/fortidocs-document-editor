@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../utils/api";
+import { getEncryptionPublicKey } from "../utils/crypto";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -78,6 +79,18 @@ function Login() {
 
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("user", JSON.stringify(res.data.user));
+
+      // Get and store encryption public key from MetaMask
+      try {
+        const encPubKey = await getEncryptionPublicKey(walletAddress);
+        await api.post("/api/keys/public", { encryptionPublicKey: encPubKey });
+        // Update local user object with the key
+        const updatedUser = { ...res.data.user, encryptionPublicKey: encPubKey };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+      } catch (keyErr) {
+        console.warn("Could not get encryption public key:", keyErr);
+      }
+
       navigate("/editor");
     } catch (err) {
       setError(err.response?.data?.error || "Secure login failed");

@@ -19,6 +19,14 @@ import htmlDocx from "html-docx-js/dist/html-docx";
 import { saveAs } from "file-saver";
 
 import api from "../utils/api";
+import {
+  generateAESKey,
+  encryptAES,
+  decryptAES,
+  getEncryptionPublicKey,
+  encryptForWallet,
+  decryptWithWallet,
+} from "../utils/crypto";
 
 /* ---------- REGISTER MODULES ---------- */
 
@@ -54,6 +62,7 @@ export default function Editor() {
   const [activeTab, setActiveTab] = useState("Home");
   const [status, setStatus] = useState("");
   const [docName, setDocName] = useState("");
+  const [aesKey, setAesKey] = useState(""); // current doc's AES key (in memory only)
 
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
@@ -99,7 +108,8 @@ export default function Editor() {
     if (window.confirm("Create new document? Unsaved changes will be lost.")) {
       setContent("");
       setDocName("");
-      showStatus("New document created");
+      setAesKey(generateAESKey()); // fresh AES key for new document
+      showStatus("New document created with encryption key");
     }
   };
 
@@ -115,6 +125,7 @@ export default function Editor() {
         setContent(ev.target.result);
         const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
         setDocName(nameWithoutExt);
+        setAesKey(generateAESKey()); // new AES key for opened local files
         showStatus(`Opened: ${file.name}`);
       };
       reader.readAsText(file);
@@ -138,12 +149,54 @@ export default function Editor() {
     }
 
     try {
-      showStatus("Saving to IPFS…");
-      const res = await api.post("/api/doc/save", { content, filename: name, target: "cloud" });
-      showStatus(`Saved "${name}" to Cloud! CID: ${res.data.cid?.substring(0, 12)}…`);
+      // Ensure we have a wallet connected for encryption
+      const wallet = user?.walletAddress;
+      if (!wallet || !window.ethereum) {
+        showStatus("Connect your wallet to save encrypted documents");
+        return;
+      }
+
+      // Ensure we have an AES key
+      let currentKey = aesKey;
+      if (!currentKey) {
+        currentKey = generateAESKey();
+        setAesKey(currentKey);
+      }
+
+      showStatus("Encrypting & saving to IPFS…");
+
+      // 1. Encrypt content with AES key
+      const encryptedContent = encryptAES(content, currentKey);
+
+      // 2. Get owner's encryption public key
+      let ownerPubKey = user?.encryptionPublicKey;
+      if (!ownerPubKey) {
+        ownerPubKey = await getEncryptionPublicKey(wallet);
+        // Store it for future use
+        await api.post("/api/keys/public", { encryptionPublicKey: ownerPubKey });
+        const updatedUser = { ...user, encryptionPublicKey: ownerPubKey };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+      }
+
+      // 3. Encrypt AES key with owner's wallet public key
+      const wrappedKey = encryptForWallet(ownerPubKey, currentKey);
+
+      // 4. Send encrypted content + encrypted key to backend
+      const res = await api.post("/api/doc/save", {
+        content: encryptedContent,
+        filename: name,
+        target: "cloud",
+        encryptedKey: JSON.stringify(wrappedKey),
+      });
+
+      showStatus(`🔒 Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
     } catch (err) {
       console.error("Save error:", err);
-      showStatus("Cloud save failed");
+      if (err.code === 4001) {
+        showStatus("Encryption cancelled by user");
+      } else {
+        showStatus("Cloud save failed");
+      }
     }
   };
 
@@ -211,22 +264,72 @@ const shareDoc = async () => {
       }
     }
 
-    showStatus("Saving & sharing…");
+    const wallet = user?.walletAddress;
+    if (!wallet || !window.ethereum) {
+      showStatus("Connect your wallet to share encrypted documents");
+      return;
+    }
 
-    // 1. Save document first
-    const saveRes = await api.post("/api/doc/save", { content, filename: name, target: "cloud" });
+    showStatus("Encrypting, saving & sharing…");
+
+    // Ensure AES key exists
+    let currentKey = aesKey;
+    if (!currentKey) {
+      currentKey = generateAESKey();
+      setAesKey(currentKey);
+    }
+
+    // 1. Encrypt content with AES key
+    const encryptedContent = encryptAES(content, currentKey);
+
+    // 2. Get owner's encryption public key & wrap AES key for owner
+    let ownerPubKey = user?.encryptionPublicKey;
+    if (!ownerPubKey) {
+      ownerPubKey = await getEncryptionPublicKey(wallet);
+      await api.post("/api/keys/public", { encryptionPublicKey: ownerPubKey });
+      const updatedUser = { ...user, encryptionPublicKey: ownerPubKey };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+    }
+    const ownerWrappedKey = encryptForWallet(ownerPubKey, currentKey);
+
+    // 3. Save encrypted document to IPFS
+    const saveRes = await api.post("/api/doc/save", {
+      content: encryptedContent,
+      filename: name,
+      target: "cloud",
+      encryptedKey: JSON.stringify(ownerWrappedKey),
+    });
     const file = saveRes.data;
 
-    // 2. Share document
+    // 4. Get receiver's encryption public key
+    let receiverKeyRes;
+    try {
+      receiverKeyRes = await api.get(`/api/keys/public/${encodeURIComponent(recipientEmail.toLowerCase())}`);
+    } catch (keyErr) {
+      showStatus(keyErr.response?.data?.error || "Recipient not found or wallet not connected");
+      return;
+    }
+
+    const receiverPubKey = receiverKeyRes.data.encryptionPublicKey;
+
+    // 5. Encrypt AES key with receiver's wallet public key
+    const receiverWrappedKey = encryptForWallet(receiverPubKey, currentKey);
+
+    // 6. Share with encrypted key for receiver
     await api.post("/api/share", {
       fileId: file._id,
       recipientEmail: recipientEmail.toLowerCase(),
+      encryptedKey: JSON.stringify(receiverWrappedKey),
     });
 
-    showStatus(`Shared with ${recipientEmail}`);
+    showStatus(`🔒 Encrypted & shared with ${recipientEmail}`);
   } catch (err) {
     console.error("Share error:", err.response?.data || err);
-    showStatus("Share failed");
+    if (err.code === 4001) {
+      showStatus("Encryption cancelled by user");
+    } else {
+      showStatus("Share failed");
+    }
   }
 };
 

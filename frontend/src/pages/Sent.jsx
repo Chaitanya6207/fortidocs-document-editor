@@ -22,6 +22,17 @@ export default function Sent() {
     }
   }
 
+  async function revokeShare(id) {
+    if (!window.confirm("Revoke this share? The recipient will lose access.")) return;
+    try {
+      await api.delete(`/api/share/${id}`);
+      setFiles((prev) => prev.filter((f) => f._id !== id));
+    } catch (err) {
+      console.error("Revoke failed:", err);
+      alert("Failed to revoke share");
+    }
+  }
+
   return (
     <div style={styles.container} className="fade-in">
       <div style={styles.titleRow}>
@@ -48,7 +59,7 @@ export default function Sent() {
                 <th>File</th>
                 <th>Receiver</th>
                 <th>Shared On</th>
-                <th style={{ textAlign: "right" }}>Action</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -56,6 +67,7 @@ export default function Sent() {
                 const cid = f.fileId?.cid;
                 const filename = f.fileId?.filename || "Unknown";
                 const hasCid = cid && cid !== "undefined";
+                const encKey = f.fileId?.encryptedKey || "";
 
                 return (
                   <tr key={f._id}>
@@ -70,20 +82,29 @@ export default function Sent() {
                         : "-"}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      {hasCid ? (
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        {hasCid ? (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => {
+                              let url = `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`;
+                              if (encKey) url += `&encryptedKey=${encodeURIComponent(encKey)}`;
+                              navigate(url);
+                            }}
+                          >
+                            Open
+                          </button>
+                        ) : (
+                          <span style={{ color: "#dc2626", fontSize: 12 }}>N/A</span>
+                        )}
                         <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() =>
-                            navigate(
-                              `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`
-                            )
-                          }
+                          className="btn btn-sm"
+                          style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}
+                          onClick={() => revokeShare(f._id)}
                         >
-                          Open
+                          Revoke
                         </button>
-                      ) : (
-                        <span style={{ color: "#dc2626", fontSize: 12 }}>N/A</span>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
