@@ -30,7 +30,11 @@ import {
 
 /* ---------- REGISTER MODULES ---------- */
 
-Quill.register("modules/imageResize", ImageResize);
+try {
+  Quill.register("modules/imageResize", ImageResize);
+} catch (e) {
+  console.warn("ImageResize module failed to register:", e);
+}
 
 /* ---------- CUSTOM ATTRIBUTORS (font, size, lineheight) ---------- */
 
@@ -95,12 +99,18 @@ PageBreakBlot.tagName = "HR";
 PageBreakBlot.className = "ql-page-break";
 Quill.register(PageBreakBlot);
 
-/* Table Embed */
+/* Table Embed — cells are editable */
 class TableEmbed extends BlockEmbed {
   static create(value) {
     const node = super.create();
-    node.setAttribute("contenteditable", "false");
     node.innerHTML = value;
+    // Make every cell editable
+    node.querySelectorAll("td, th").forEach((cell) => {
+      cell.setAttribute("contenteditable", "true");
+    });
+    // Prevent Quill from capturing keyboard events inside the table
+    node.addEventListener("keydown", (e) => e.stopPropagation());
+    node.addEventListener("input", (e) => e.stopPropagation());
     return node;
   }
   static value(node) {
@@ -468,16 +478,23 @@ const shareDoc = async () => {
           border-collapse: collapse;
           width: 100%;
         }
-        .ql-table-embed th {
+        .ql-table-embed th,
+        .ql-table-embed td {
           padding: 10px 14px;
-          background: #f1f5f9;
           border: 1px solid #cbd5e1;
+          cursor: text;
+          outline: none;
+          min-width: 60px;
+        }
+        .ql-table-embed th {
+          background: #f1f5f9;
           font-weight: 600;
           text-align: left;
         }
-        .ql-table-embed td {
-          padding: 8px 14px;
-          border: 1px solid #cbd5e1;
+        .ql-table-embed td:focus,
+        .ql-table-embed th:focus {
+          background: #eff6ff;
+          box-shadow: inset 0 0 0 2px #2563eb;
         }
         .ql-table-embed tr:hover td {
           background: #f8fafc;

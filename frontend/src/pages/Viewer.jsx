@@ -52,9 +52,24 @@ export default function Viewer() {
             const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
             const account = accounts[0];
 
+            // Parse the encrypted AES key
+            // encryptedKeyParam is already decoded by URLSearchParams.get()
+            let encryptedKeyObj;
+            try {
+              encryptedKeyObj = JSON.parse(encryptedKeyParam);
+            } catch (parseErr) {
+              console.error("Failed to parse encryptedKey:", parseErr);
+              setError("Invalid encryption key format.");
+              return;
+            }
+
             // Decrypt AES key using wallet
-            const encryptedKeyObj = JSON.parse(decodeURIComponent(encryptedKeyParam));
             const aesKey = await decryptWithWallet(encryptedKeyObj, account);
+
+            if (!aesKey) {
+              setError("Wallet decryption returned empty key.");
+              return;
+            }
 
             // Decrypt content with AES key
             const plaintext = decryptAES(data.encryptedContent, aesKey);
@@ -67,8 +82,10 @@ export default function Viewer() {
             console.error("Decryption error:", decErr);
             if (decErr.code === 4001) {
               setError("Decryption was cancelled by user.");
+            } else if (decErr.code === -32601 || decErr.message?.includes("not found")) {
+              setError("Your wallet does not support eth_decrypt. Try using MetaMask.");
             } else {
-              setError("Failed to decrypt document. Make sure you're using the correct wallet.");
+              setError(`Failed to decrypt: ${decErr.message || "Make sure you're using the correct wallet."}`);
             }
           } finally {
             setDecrypting(false);

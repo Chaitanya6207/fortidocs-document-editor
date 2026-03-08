@@ -13,15 +13,18 @@ export default function InsertRibbon({ editor }) {
 
   /* ---------- IMAGE ---------- */
   const insertImageUrl = () => {
-    const range = getRange();
     const url = prompt("Enter image URL:");
     if (!url) return;
-    editor.insertEmbed(range.index, "image", url, "user");
-    editor.setSelection(range.index + 1);
+    // Focus editor first, then insert after browser settles
+    editor.focus();
+    setTimeout(() => {
+      const range = editor.getSelection() || { index: editor.getLength() - 1 };
+      editor.insertEmbed(range.index, "image", url, "user");
+      editor.setSelection(range.index + 1);
+    }, 50);
   };
 
   const insertImageFile = () => {
-    const range = getRange();
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -30,9 +33,13 @@ export default function InsertRibbon({ editor }) {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
+        // Focus editor and let browser settle before inserting
         editor.focus();
-        editor.insertEmbed(range.index, "image", ev.target.result, "user");
-        editor.setSelection(range.index + 1);
+        setTimeout(() => {
+          const range = editor.getSelection() || { index: editor.getLength() - 1 };
+          editor.insertEmbed(range.index, "image", ev.target.result, "user");
+          editor.setSelection(range.index + 1);
+        }, 50);
       };
       reader.readAsDataURL(file);
     };
