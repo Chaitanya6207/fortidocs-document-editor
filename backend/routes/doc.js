@@ -1,9 +1,40 @@
 const express = require("express");
 const router = express.Router();
+const axios = require("axios");
 const auth = require("../middleware/auth");
 const File = require("../models/File");
 const ActivityLog = require("../models/ActivityLog");
 const { pinJSONToIPFS } = require("../services/pinata");
+
+/**
+ * GET /api/doc/ipfs/:cid
+ * Proxy fetch from IPFS so the frontend avoids CORS / rate-limit issues
+ * with the public Pinata gateway.
+ */
+router.get("/ipfs/:cid", auth, async (req, res) => {
+  const { cid } = req.params;
+  if (!cid || cid.length < 10) {
+    return res.status(400).json({ error: "Invalid CID" });
+  }
+
+  // Try multiple gateways in order
+  const gateways = [
+    `https://gateway.pinata.cloud/ipfs/${cid}`,
+    `https://ipfs.io/ipfs/${cid}`,
+    `https://cloudflare-ipfs.com/ipfs/${cid}`,
+  ];
+
+  for (const url of gateways) {
+    try {
+      const response = await axios.get(url, { timeout: 15000 });
+      return res.json(response.data);
+    } catch (err) {
+      console.warn(`IPFS gateway failed (${url}):`, err.message);
+    }
+  }
+
+  res.status(502).json({ error: "Failed to fetch document from IPFS. All gateways failed." });
+});
 
 /**
  * POST /api/doc/save

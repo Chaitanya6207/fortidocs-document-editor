@@ -15,16 +15,26 @@ export default function InsertRibbon({ editor }) {
   const insertImageUrl = () => {
     const url = prompt("Enter image URL:");
     if (!url) return;
-    // Focus editor first, then insert after browser settles
+    // Focus editor and force a selection before inserting
     editor.focus();
     setTimeout(() => {
-      const range = editor.getSelection() || { index: editor.getLength() - 1 };
+      let range = editor.getSelection();
+      if (!range) {
+        // Force selection at end of document
+        const len = editor.getLength();
+        editor.setSelection(len - 1, 0);
+        range = { index: len - 1, length: 0 };
+      }
       editor.insertEmbed(range.index, "image", url, "user");
       editor.setSelection(range.index + 1);
-    }, 50);
+    }, 100);
   };
 
   const insertImageFile = () => {
+    // Capture current position before file dialog steals focus
+    editor.focus();
+    const savedRange = editor.getSelection() || { index: editor.getLength() - 1, length: 0 };
+
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -33,13 +43,12 @@ export default function InsertRibbon({ editor }) {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-        // Focus editor and let browser settle before inserting
+        // Re-focus editor after file dialog closed
         editor.focus();
         setTimeout(() => {
-          const range = editor.getSelection() || { index: editor.getLength() - 1 };
-          editor.insertEmbed(range.index, "image", ev.target.result, "user");
-          editor.setSelection(range.index + 1);
-        }, 50);
+          editor.insertEmbed(savedRange.index, "image", ev.target.result, "user");
+          editor.setSelection(savedRange.index + 1);
+        }, 100);
       };
       reader.readAsDataURL(file);
     };

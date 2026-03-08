@@ -30,6 +30,9 @@ import {
 
 /* ---------- REGISTER MODULES ---------- */
 
+// ImageResize module requires window.Quill to function properly
+window.Quill = Quill;
+
 try {
   Quill.register("modules/imageResize", ImageResize);
 } catch (e) {
@@ -104,13 +107,28 @@ class TableEmbed extends BlockEmbed {
   static create(value) {
     const node = super.create();
     node.innerHTML = value;
+
     // Make every cell editable
     node.querySelectorAll("td, th").forEach((cell) => {
       cell.setAttribute("contenteditable", "true");
     });
-    // Prevent Quill from capturing keyboard events inside the table
-    node.addEventListener("keydown", (e) => e.stopPropagation());
-    node.addEventListener("input", (e) => e.stopPropagation());
+
+    // Comprehensive event isolation — stop ALL events from bubbling
+    // to Quill so it cannot intercept editing inside table cells
+    const stopIfInCell = (e) => {
+      if (e.target.closest && e.target.closest("td, th")) {
+        e.stopPropagation();
+      }
+    };
+    [
+      "mousedown", "mouseup", "click", "dblclick",
+      "keydown", "keyup", "keypress",
+      "input", "beforeinput",
+      "paste", "copy", "cut",
+      "compositionstart", "compositionend", "compositionupdate",
+      "focus", "focusin", "focusout",
+    ].forEach((evt) => node.addEventListener(evt, stopIfInCell, true));
+
     return node;
   }
   static value(node) {
