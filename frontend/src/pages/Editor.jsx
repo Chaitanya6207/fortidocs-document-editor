@@ -22,10 +22,6 @@ import api from "../utils/api";
 import {
   generateAESKey,
   encryptAES,
-  decryptAES,
-  getEncryptionPublicKey,
-  encryptForWallet,
-  decryptWithWallet,
 } from "../utils/crypto";
 
 /* ---------- REGISTER MODULES ---------- */
@@ -269,13 +265,6 @@ export default function Editor() {
     }
 
     try {
-      // Ensure we have a wallet connected for encryption
-      const wallet = user?.walletAddress;
-      if (!wallet || !window.ethereum) {
-        showStatus("Connect your wallet to save encrypted documents");
-        return;
-      }
-
       // Ensure we have an AES key
       let currentKey = aesKey;
       if (!currentKey) {
@@ -288,36 +277,19 @@ export default function Editor() {
       // 1. Encrypt content with AES key
       const encryptedContent = encryptAES(content, currentKey);
 
-      // 2. Get owner's encryption public key
-      let ownerPubKey = user?.encryptionPublicKey;
-      if (!ownerPubKey) {
-        ownerPubKey = await getEncryptionPublicKey(wallet);
-        // Store it for future use
-        await api.post("/api/keys/public", { encryptionPublicKey: ownerPubKey });
-        const updatedUser = { ...user, encryptionPublicKey: ownerPubKey };
-        localStorage.setItem("user", JSON.stringify(updatedUser));
-      }
-
-      // 3. Encrypt AES key with owner's wallet public key
-      const wrappedKey = encryptForWallet(ownerPubKey, currentKey);
-
-      // 4. Send encrypted content + encrypted key + raw AES key to backend
+      // 2. Send encrypted content + raw AES key to backend
+      //    Backend will encrypt the AES key server-side for session-based decryption
       const res = await api.post("/api/doc/save", {
         content: encryptedContent,
         filename: name,
         target: "cloud",
-        encryptedKey: JSON.stringify(wrappedKey),
         aesKey: currentKey,
       });
 
       showStatus(`🔒 Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
     } catch (err) {
       console.error("Save error:", err);
-      if (err.code === 4001) {
-        showStatus("Encryption cancelled by user");
-      } else {
-        showStatus("Cloud save failed");
-      }
+      showStatus(err.response?.data?.error || "Cloud save failed");
     }
   };
 
@@ -385,12 +357,6 @@ const shareDoc = async () => {
       }
     }
 
-    const wallet = user?.walletAddress;
-    if (!wallet || !window.ethereum) {
-      showStatus("Connect your wallet to share encrypted documents");
-      return;
-    }
-
     showStatus("Encrypting, saving & sharing…");
 
     // Ensure AES key exists
@@ -403,56 +369,26 @@ const shareDoc = async () => {
     // 1. Encrypt content with AES key
     const encryptedContent = encryptAES(content, currentKey);
 
-    // 2. Get owner's encryption public key & wrap AES key for owner
-    let ownerPubKey = user?.encryptionPublicKey;
-    if (!ownerPubKey) {
-      ownerPubKey = await getEncryptionPublicKey(wallet);
-      await api.post("/api/keys/public", { encryptionPublicKey: ownerPubKey });
-      const updatedUser = { ...user, encryptionPublicKey: ownerPubKey };
-      localStorage.setItem("user", JSON.stringify(updatedUser));
-    }
-    const ownerWrappedKey = encryptForWallet(ownerPubKey, currentKey);
-
-    // 3. Save encrypted document to IPFS
+    // 2. Save encrypted document to IPFS (server stores server-encrypted AES key)
     const saveRes = await api.post("/api/doc/save", {
       content: encryptedContent,
       filename: name,
       target: "cloud",
-      encryptedKey: JSON.stringify(ownerWrappedKey),
       aesKey: currentKey,
     });
     const file = saveRes.data;
 
-    // 4. Get receiver's encryption public key
-    let receiverKeyRes;
-    try {
-      receiverKeyRes = await api.get(`/api/keys/public/${encodeURIComponent(recipientEmail.toLowerCase())}`);
-    } catch (keyErr) {
-      showStatus(keyErr.response?.data?.error || "Recipient not found or wallet not connected");
-      return;
-    }
-
-    const receiverPubKey = receiverKeyRes.data.encryptionPublicKey;
-
-    // 5. Encrypt AES key with receiver's wallet public key
-    const receiverWrappedKey = encryptForWallet(receiverPubKey, currentKey);
-
-    // 6. Share with encrypted key for receiver
+    // 3. Share — server stores a server-encrypted key for the recipient
     await api.post("/api/share", {
       fileId: file._id,
       recipientEmail: recipientEmail.toLowerCase(),
-      encryptedKey: JSON.stringify(receiverWrappedKey),
       aesKey: currentKey,
     });
 
     showStatus(`🔒 Encrypted & shared with ${recipientEmail}`);
   } catch (err) {
     console.error("Share error:", err.response?.data || err);
-    if (err.code === 4001) {
-      showStatus("Encryption cancelled by user");
-    } else {
-      showStatus("Share failed");
-    }
+    showStatus(err.response?.data?.error || "Share failed");
   }
 };
 
