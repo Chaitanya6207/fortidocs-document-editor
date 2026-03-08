@@ -8,6 +8,7 @@ const accessSchema = new mongoose.Schema({
   recipientEmail: { type: String, required: true },
   permission: { type: String, enum: ['VIEW','EDIT'], default: 'VIEW' },
   encryptedKey: { type: String, default: "" },
+  serverEncryptedKey: { type: String, default: "" },
   blockchainTxHash: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });

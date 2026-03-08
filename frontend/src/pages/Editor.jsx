@@ -301,12 +301,13 @@ export default function Editor() {
       // 3. Encrypt AES key with owner's wallet public key
       const wrappedKey = encryptForWallet(ownerPubKey, currentKey);
 
-      // 4. Send encrypted content + encrypted key to backend
+      // 4. Send encrypted content + encrypted key + raw AES key to backend
       const res = await api.post("/api/doc/save", {
         content: encryptedContent,
         filename: name,
         target: "cloud",
         encryptedKey: JSON.stringify(wrappedKey),
+        aesKey: currentKey,
       });
 
       showStatus(`🔒 Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
@@ -418,6 +419,7 @@ const shareDoc = async () => {
       filename: name,
       target: "cloud",
       encryptedKey: JSON.stringify(ownerWrappedKey),
+      aesKey: currentKey,
     });
     const file = saveRes.data;
 
@@ -440,6 +442,7 @@ const shareDoc = async () => {
       fileId: file._id,
       recipientEmail: recipientEmail.toLowerCase(),
       encryptedKey: JSON.stringify(receiverWrappedKey),
+      aesKey: currentKey,
     });
 
     showStatus(`🔒 Encrypted & shared with ${recipientEmail}`);

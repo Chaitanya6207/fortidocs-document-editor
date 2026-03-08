@@ -59,9 +59,9 @@ export default function MyFiles() {
     }
   };
 
-  const openInViewer = (cid, filename, encryptedKey) => {
-    let url = `/viewer?cid=${cid}&filename=${encodeURIComponent(filename)}`;
-    if (encryptedKey) url += `&encryptedKey=${encodeURIComponent(encryptedKey)}`;
+  const openInViewer = (fileId, cid, filename) => {
+    let url = `/viewer?fileId=${fileId}&filename=${encodeURIComponent(filename)}`;
+    if (cid) url += `&cid=${cid}`;
     window.open(url, "_blank");
   };
 
@@ -172,7 +172,7 @@ export default function MyFiles() {
                   {file.cid && (
                     <button
                       style={styles.actionBtn}
-                      onClick={() => openInViewer(file.cid, file.filename, file.encryptedKey)}
+                      onClick={() => openInViewer(file._id, file.cid, file.filename)}
                       title="Open in Viewer"
                     >
                       👁 View

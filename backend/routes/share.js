@@ -4,6 +4,7 @@ const auth = require("../middleware/auth");
 const FileAccess = require("../models/FileAccess");
 const File = require("../models/File");
 const ActivityLog = require("../models/ActivityLog");
+const { serverEncrypt } = require("../services/serverCrypto");
 
 console.log("🔥 share.js loaded");
 
@@ -18,7 +19,7 @@ router.post("/", auth, async (req, res) => {
     console.log("📩 SHARE BODY:", req.body);
     console.log("👤 USER:", req.user);
 
-    const { fileId, recipientEmail, encryptedKey } = req.body;
+    const { fileId, recipientEmail, encryptedKey, aesKey } = req.body;
 
     if (!fileId || !recipientEmail) {
       return res.status(400).json({ error: "Missing fileId or recipientEmail" });
@@ -29,12 +30,22 @@ router.post("/", auth, async (req, res) => {
       return res.status(404).json({ error: "File not found" });
     }
 
+    // Server-encrypt the AES key for the recipient
+    let srvKey = "";
+    if (aesKey) {
+      srvKey = serverEncrypt(aesKey);
+    } else if (file.serverEncryptedKey) {
+      // Reuse the file's server-encrypted key for backward compat
+      srvKey = file.serverEncryptedKey;
+    }
+
     const access = await FileAccess.create({
       fileId: file._id,
       ownerId: req.user.id,
       recipientEmail: recipientEmail.trim().toLowerCase(),
       permission: "VIEW",
       encryptedKey: encryptedKey || "",
+      serverEncryptedKey: srvKey,
     });
 
     console.log("✅ FileAccess created:", access);

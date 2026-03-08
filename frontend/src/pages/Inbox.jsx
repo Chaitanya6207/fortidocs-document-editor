@@ -50,7 +50,7 @@ export default function Inbox() {
                 const filename = f?.fileId?.filename || "Unknown file";
                 const senderName = f?.ownerId?.name || f?.ownerId?.email || "-";
                 const hasCid = cid && cid !== "undefined";
-                const encKey = f?.encryptedKey || "";
+                const fileMongoId = f?.fileId?._id;
 
                 return (
                   <tr key={f._id}>
@@ -71,8 +71,7 @@ export default function Inbox() {
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => {
-                              let url = `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`;
-                              if (encKey) url += `&encryptedKey=${encodeURIComponent(encKey)}`;
+                              let url = `/viewer?fileId=${fileMongoId}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}`;
                               navigate(url);
                             }}
                           >

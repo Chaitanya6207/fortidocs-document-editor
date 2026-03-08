@@ -10,6 +10,7 @@ const fileSchema = new mongoose.Schema({
   size: { type: Number },
   encrypted: { type: Boolean, default: false },
   encryptedKey: { type: String, default: "" },
+  serverEncryptedKey: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now }
 });
 

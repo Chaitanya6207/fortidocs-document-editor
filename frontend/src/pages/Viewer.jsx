@@ -1,130 +1,72 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import "react-quill/dist/quill.snow.css";
-import { decryptAES, decryptWithWallet } from "../utils/crypto";
 import api from "../utils/api";
 
+/**
+ * Viewer — session-based decryption (no MetaMask popup).
+ *
+ * URL params:
+ *   fileId   — MongoDB _id of the File document (preferred, uses server-side decrypt)
+ *   cid      — (optional fallback) IPFS CID  
+ *   filename — display name
+ */
 export default function Viewer() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
 
+  const fileId = params.get("fileId");
   const cid = params.get("cid");
   const filename = params.get("filename") || "Shared Document";
-  const encryptedKeyParam = params.get("encryptedKey"); // JSON string of wallet-encrypted AES key
 
   const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [decrypting, setDecrypting] = useState(false);
   const [isEncrypted, setIsEncrypted] = useState(false);
+  const [displayCid, setDisplayCid] = useState(cid || "");
 
   useEffect(() => {
-    if (!cid) {
-      setError("No CID provided.");
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
 
     const loadDocument = async () => {
       try {
-        // --- Step 1: Fetch IPFS content via backend proxy ---
+        // ──────────── SESSION-BASED DECRYPT (preferred) ────────────
+        if (fileId) {
+          console.log("[Viewer] Loading via session-based decrypt, fileId:", fileId);
+          const res = await api.get(`/api/doc/view/${fileId}`);
+          if (cancelled) return;
+
+          const { html: docHtml, cid: docCid, encrypted } = res.data;
+          setHtml(docHtml);
+          setIsEncrypted(!!encrypted);
+          if (docCid) setDisplayCid(docCid);
+          return;
+        }
+
+        // ──────────── FALLBACK: direct IPFS fetch (unencrypted only) ────
+        if (!cid) {
+          setError("No file ID or CID provided.");
+          return;
+        }
+
         console.log("[Viewer] Fetching CID:", cid);
         let data;
         try {
           const res = await api.get(`/api/doc/ipfs/${cid}`);
           data = res.data;
         } catch (fetchErr) {
-          console.warn("[Viewer] Backend proxy failed, trying direct gateway...", fetchErr.message);
-          // Fallback: try direct fetch from public gateway
           const directRes = await fetch(`https://gateway.pinata.cloud/ipfs/${cid}`);
           if (!directRes.ok) throw new Error(`IPFS fetch failed (${directRes.status})`);
           data = await directRes.json();
         }
 
         if (cancelled) return;
-        console.log("[Viewer] IPFS data type:", data?.type);
 
-        // --- Step 2: Handle encrypted document ---
-        if (data.type === "encrypted-document" && data.encryptedContent) {
-          setIsEncrypted(true);
-
-          if (!encryptedKeyParam) {
-            setError("This document is encrypted but no decryption key was provided.");
-            return;
-          }
-
-          if (!window.ethereum) {
-            setError("MetaMask is required to decrypt this document.");
-            return;
-          }
-
-          setDecrypting(true);
-
-          // 2a. Connect wallet
-          console.log("[Viewer] Requesting wallet accounts...");
-          const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-          const account = accounts[0];
-          console.log("[Viewer] Using account:", account);
-
-          // 2b. Parse the encrypted AES key
-          let encryptedKeyObj;
-          try {
-            encryptedKeyObj = JSON.parse(encryptedKeyParam);
-          } catch (parseErr) {
-            console.error("[Viewer] Failed to parse encryptedKey:", parseErr);
-            setError("Invalid encryption key format.");
-            setDecrypting(false);
-            return;
-          }
-          console.log("[Viewer] Encrypted key version:", encryptedKeyObj?.version);
-
-          // 2c. Decrypt AES key via MetaMask wallet
-          let aesKey;
-          try {
-            console.log("[Viewer] Calling eth_decrypt...");
-            aesKey = await decryptWithWallet(encryptedKeyObj, account);
-            console.log("[Viewer] AES key decrypted successfully, length:", aesKey?.length);
-          } catch (walletErr) {
-            console.error("[Viewer] Wallet decryption error:", walletErr);
-            if (walletErr.code === 4001) {
-              setError("Decryption was cancelled by user.");
-            } else {
-              setError(
-                "Failed to decrypt with wallet. Make sure you are using the same MetaMask account that saved this document."
-              );
-            }
-            setDecrypting(false);
-            return;
-          }
-
-          if (!aesKey) {
-            setError("Wallet decryption returned empty key.");
-            setDecrypting(false);
-            return;
-          }
-
-          // 2d. Decrypt document content with AES key
-          try {
-            const plaintext = decryptAES(data.encryptedContent, aesKey);
-            if (!plaintext) {
-              setError("AES decryption produced empty result — the key may not match this document.");
-              setDecrypting(false);
-              return;
-            }
-            console.log("[Viewer] Document decrypted successfully, length:", plaintext.length);
-            if (!cancelled) setHtml(plaintext);
-          } catch (aesErr) {
-            console.error("[Viewer] AES decryption error:", aesErr);
-            setError("Failed to decrypt document content.");
-          } finally {
-            if (!cancelled) setDecrypting(false);
-          }
+        if (data.type === "encrypted-document") {
+          setError("This document is encrypted. Please open it from My Files or Inbox so the session can decrypt it.");
           return;
         }
 
-        // --- Step 3: Unencrypted document (backward compatible) ---
         if (data.content) {
           setHtml(data.content);
         } else if (typeof data === "string") {
@@ -134,7 +76,10 @@ export default function Viewer() {
         }
       } catch (err) {
         console.error("[Viewer] Load error:", err);
-        if (!cancelled) setError("Failed to load document from IPFS.");
+        if (!cancelled) {
+          const msg = err.response?.data?.error || "Failed to load document.";
+          setError(msg);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -142,7 +87,7 @@ export default function Viewer() {
 
     loadDocument();
     return () => { cancelled = true; };
-  }, [cid, encryptedKeyParam]);
+  }, [fileId, cid]);
 
   return (
     <div style={styles.wrapper}>
@@ -159,24 +104,26 @@ export default function Viewer() {
               {isEncrypted && "🔐 "}{filename}
             </div>
             <div style={styles.cidLabel}>
-              CID: {cid ? `${cid.substring(0, 16)}…` : "N/A"}
-              {isEncrypted && " • Encrypted"}
+              {displayCid ? `CID: ${displayCid.substring(0, 16)}…` : ""}
+              {isEncrypted && " • Encrypted (session-decrypted)"}
             </div>
           </div>
         </div>
 
         <div style={styles.topActions}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() =>
-              navigator.clipboard.writeText(`https://gateway.pinata.cloud/ipfs/${cid}`)
-            }
-          >
-            Copy Link
-          </button>
-          {!isEncrypted && (
+          {displayCid && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() =>
+                navigator.clipboard.writeText(`https://gateway.pinata.cloud/ipfs/${displayCid}`)
+              }
+            >
+              Copy Link
+            </button>
+          )}
+          {!isEncrypted && displayCid && (
             <a
-              href={`https://gateway.pinata.cloud/ipfs/${cid}`}
+              href={`https://gateway.pinata.cloud/ipfs/${displayCid}`}
               target="_blank"
               rel="noreferrer"
               className="btn btn-ghost btn-sm"
@@ -188,11 +135,11 @@ export default function Viewer() {
       </div>
 
       {/* Content area */}
-      {(loading || decrypting) && (
+      {loading && (
         <div style={styles.center}>
           <div className="spinner" />
           <p style={{ marginTop: 12, color: "#64748b" }}>
-            {decrypting ? "🔐 Decrypting with your wallet…" : "Fetching from IPFS…"}
+            Loading document…
           </p>
         </div>
       )}
@@ -205,7 +152,7 @@ export default function Viewer() {
         </div>
       )}
 
-      {!loading && !decrypting && !error && (
+      {!loading && !error && (
         <div style={styles.pageWrap}>
           <div className="ql-snow" style={styles.page}>
             <div
