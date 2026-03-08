@@ -12,6 +12,7 @@ import ViewRibbon from "../components/ViewRibbon";
 
 import Sent from "./Sent";
 import Inbox from "./Inbox";
+import MyFiles from "./MyFiles";
 
 import { useNavigate } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
@@ -138,12 +139,39 @@ export default function Editor() {
 
     try {
       showStatus("Saving to IPFS…");
-      const res = await api.post("/api/doc/save", { content, filename: name });
-      showStatus(`Saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
+      const res = await api.post("/api/doc/save", { content, filename: name, target: "cloud" });
+      showStatus(`Saved "${name}" to Cloud! CID: ${res.data.cid?.substring(0, 12)}…`);
     } catch (err) {
       console.error("Save error:", err);
-      showStatus("Save failed");
+      showStatus("Cloud save failed");
     }
+  };
+
+  const saveLocalDoc = () => {
+    if (!content || content === "<p><br></p>") {
+      showStatus("Nothing to save — document is empty");
+      return;
+    }
+
+    let name = docName;
+    if (!name) {
+      name = askForName(docName || "document");
+      if (!name) {
+        showStatus("Save cancelled — no filename provided");
+        return;
+      }
+    }
+
+    // Download as HTML file
+    const blob = new Blob([content], { type: "text/html" });
+    saveAs(blob, `${name}.html`);
+    showStatus(`Saved "${name}.html" to Downloads`);
+
+    // Log the local save in the background
+    api.post("/api/doc/log", {
+      action: "SAVED_LOCAL",
+      details: `Downloaded "${name}.html" locally`,
+    }).catch(() => {});
   };
 
   const saveAsDoc = () => {
@@ -186,7 +214,7 @@ const shareDoc = async () => {
     showStatus("Saving & sharing…");
 
     // 1. Save document first
-    const saveRes = await api.post("/api/doc/save", { content, filename: name });
+    const saveRes = await api.post("/api/doc/save", { content, filename: name, target: "cloud" });
     const file = saveRes.data;
 
     // 2. Share document
@@ -240,7 +268,8 @@ const shareDoc = async () => {
         <FileRibbon
           onNew={newDoc}
           onOpen={openDoc}
-          onSave={saveDoc}
+          onSaveCloud={saveDoc}
+          onSaveLocal={saveLocalDoc}
           onSaveAs={saveAsDoc}
           onPrint={printDoc}
           onExport={exportDoc}
@@ -277,6 +306,9 @@ const shareDoc = async () => {
 
       {/* INBOX DASHBOARD */}
       {activeTab === "Inbox" && <Inbox />}
+
+      {/* MY FILES */}
+      {activeTab === "My Files" && <MyFiles />}
 
       {/* DOCUMENT EDITOR (ONLY WHEN EDITING) */}
       {["File", "Home", "Insert", "Layout", "View"].includes(activeTab) && (

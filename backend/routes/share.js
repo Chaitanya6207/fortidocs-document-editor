@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const FileAccess = require("../models/FileAccess");
 const File = require("../models/File");
+const ActivityLog = require("../models/ActivityLog");
 
 console.log("🔥 share.js loaded");
 
@@ -36,6 +37,14 @@ router.post("/", auth, async (req, res) => {
     });
 
     console.log("✅ FileAccess created:", access);
+
+    // Log the share action
+    await ActivityLog.create({
+      fileId: file._id,
+      userId: req.user.id,
+      action: "SHARED",
+      details: `Shared with ${recipientEmail.trim().toLowerCase()}`,
+    });
 
     res.json(access);
   } catch (err) {

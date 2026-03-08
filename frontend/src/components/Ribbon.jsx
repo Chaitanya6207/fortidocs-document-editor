@@ -7,6 +7,7 @@ export default function Ribbon({ activeTab, setActiveTab }) {
     { key: "View", icon: "👁" },
     { key: "Sent", icon: "📤" },
     { key: "Inbox", icon: "📥" },
+    { key: "My Files", icon: "🗂" },
   ];
 
   return (

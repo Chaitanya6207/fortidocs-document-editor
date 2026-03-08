@@ -1,7 +1,8 @@
 export default function FileRibbon({
   onNew,
   onOpen,
-  onSave,
+  onSaveCloud,
+  onSaveLocal,
   onSaveAs,
   onPrint,
   onExport,
@@ -10,29 +11,37 @@ export default function FileRibbon({
   const actions = [
     { label: "New", icon: "📄", fn: onNew },
     { label: "Open", icon: "📂", fn: onOpen },
-    { label: "Save", icon: "💾", fn: onSave, primary: true },
-    { label: "Save As", icon: "📥", fn: onSaveAs },
+    null, // separator
+    { label: "Save to Cloud", icon: "☁️", fn: onSaveCloud, primary: true },
+    { label: "Save to Device", icon: "💾", fn: onSaveLocal },
+    { label: "Save As DOCX", icon: "📥", fn: onSaveAs },
+    null,
     { label: "Print", icon: "🖨️", fn: onPrint },
     { label: "Export", icon: "📤", fn: onExport },
+    null,
     { label: "Share", icon: "🔗", fn: onShare, accent: true },
   ];
 
   return (
     <div style={styles.ribbon}>
-      {actions.map((a) => (
-        <button
-          key={a.label}
-          onClick={a.fn}
-          style={{
-            ...styles.btn,
-            ...(a.primary ? styles.primary : {}),
-            ...(a.accent ? styles.accent : {}),
-          }}
-        >
-          <span style={styles.icon}>{a.icon}</span>
-          {a.label}
-        </button>
-      ))}
+      {actions.map((a, i) =>
+        a === null ? (
+          <div key={`sep-${i}`} style={styles.sep} />
+        ) : (
+          <button
+            key={a.label}
+            onClick={a.fn}
+            style={{
+              ...styles.btn,
+              ...(a.primary ? styles.primary : {}),
+              ...(a.accent ? styles.accent : {}),
+            }}
+          >
+            <span style={styles.icon}>{a.icon}</span>
+            {a.label}
+          </button>
+        )
+      )}
     </div>
   );
 }
@@ -45,6 +54,13 @@ const styles = {
     background: "#f8fafc",
     borderBottom: "1px solid #e2e8f0",
     flexWrap: "wrap",
+    alignItems: "center",
+  },
+  sep: {
+    width: 1,
+    height: 28,
+    background: "#e2e8f0",
+    margin: "0 4px",
   },
   btn: {
     display: "flex",
