@@ -234,7 +234,7 @@ export default function InsertRibbon({ editor }) {
       title: "Symbols",
       items: [
         { label: "Horizontal Line", icon: "—", fn: insertHR },
-        { label: "Page Break", icon: "📃", fn: insertPageBreak },
+        { label: "Page Break", icon: "�", fn: insertPageBreak },
         { label: "Date & Time", icon: "📅", fn: insertDateTime },
         {
           label: "Symbol",

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import ReactQuill, { Quill } from "react-quill";
 import ImageResize from "quill-image-resize-module-react";
 import "react-quill/dist/quill.snow.css";
@@ -26,8 +26,10 @@ import {
 
 /* ---------- REGISTER MODULES ---------- */
 
-// ImageResize module requires window.Quill to function properly
+// ImageResize module requires window.Quill with Parchment accessible
 window.Quill = Quill;
+
+const Parchment = Quill.import("parchment");
 
 try {
   Quill.register("modules/imageResize", ImageResize);
@@ -36,8 +38,6 @@ try {
 }
 
 /* ---------- CUSTOM ATTRIBUTORS (font, size, lineheight) ---------- */
-
-const Parchment = Quill.import("parchment");
 
 const FontStyle = new Parchment.Attributor.Style("font", "font-family", {
   scope: Parchment.Scope.INLINE,
@@ -90,11 +90,12 @@ Quill.register(DividerBlot);
 class PageBreakBlot extends BlockEmbed {
   static create() {
     const node = super.create();
+    node.setAttribute("contenteditable", "false");
     return node;
   }
 }
 PageBreakBlot.blotName = "pageBreak";
-PageBreakBlot.tagName = "HR";
+PageBreakBlot.tagName = "DIV";
 PageBreakBlot.className = "ql-page-break";
 Quill.register(PageBreakBlot);
 
@@ -102,6 +103,7 @@ Quill.register(PageBreakBlot);
 class TableEmbed extends BlockEmbed {
   static create(value) {
     const node = super.create();
+    node.setAttribute("contenteditable", "false");
     node.innerHTML = value;
 
     // Make every cell editable
@@ -109,21 +111,28 @@ class TableEmbed extends BlockEmbed {
       cell.setAttribute("contenteditable", "true");
     });
 
-    // Comprehensive event isolation — stop ALL events from bubbling
-    // to Quill so it cannot intercept editing inside table cells
-    const stopIfInCell = (e) => {
+    // Stop keyboard events from reaching Quill when editing inside cells.
+    // This prevents Quill from treating Backspace/Delete as "delete the embed".
+    const stopKeyboard = (e) => {
       if (e.target.closest && e.target.closest("td, th")) {
         e.stopPropagation();
       }
     };
     [
-      "mousedown", "mouseup", "click", "dblclick",
       "keydown", "keyup", "keypress",
       "input", "beforeinput",
       "paste", "copy", "cut",
       "compositionstart", "compositionend", "compositionupdate",
-      "focus", "focusin", "focusout",
-    ].forEach((evt) => node.addEventListener(evt, stopIfInCell, true));
+    ].forEach((evt) => node.addEventListener(evt, stopKeyboard));
+
+    // For mouse events, only stop propagation on the node — not the cells —
+    // so Quill can't re-focus itself, but native cell focus still works.
+    const stopMouse = (e) => {
+      e.stopPropagation();
+    };
+    ["mousedown", "mouseup", "click"].forEach((evt) =>
+      node.addEventListener(evt, stopMouse)
+    );
 
     return node;
   }
@@ -198,6 +207,69 @@ export default function Editor() {
     gridlines: false,
     darkMode: false,
   });
+
+  /* ---------- PAGE COUNT TRACKING ---------- */
+  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageHeightRef = useRef(0);
+
+  // Measure page height in px from the CSS mm value
+  const measurePageHeightPx = useCallback(() => {
+    const mm = parseFloat(
+      pageSettings.orientation === "landscape"
+        ? pageSettings.width
+        : pageSettings.height
+    ) || 297;
+    const el = document.createElement("div");
+    el.style.height = `${mm}mm`;
+    el.style.position = "absolute";
+    el.style.visibility = "hidden";
+    document.body.appendChild(el);
+    const px = el.getBoundingClientRect().height;
+    document.body.removeChild(el);
+    return px;
+  }, [pageSettings.orientation, pageSettings.width, pageSettings.height]);
+
+  // Track content height → total pages
+  useEffect(() => {
+    const editorEl = quillRef.current?.getEditor()?.root;
+    if (!editorEl) return;
+
+    const update = () => {
+      const ph = measurePageHeightPx();
+      pageHeightRef.current = ph;
+      if (ph > 0) {
+        setTotalPages(Math.max(1, Math.ceil(editorEl.scrollHeight / ph)));
+      }
+    };
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(editorEl);
+    return () => observer.disconnect();
+  }, [measurePageHeightPx, content]);
+
+  // Track cursor position → current page
+  const updateCurrentPage = useCallback(() => {
+    const ed = quillRef.current?.getEditor();
+    if (!ed || !pageHeightRef.current) return;
+    const sel = ed.getSelection();
+    if (!sel) return;
+    const bounds = ed.getBounds(sel.index);
+    setCurrentPage(Math.floor(bounds.top / pageHeightRef.current) + 1);
+  }, []);
+
+  // Listen for selection/typing changes to update current page
+  useEffect(() => {
+    const ed = quillRef.current?.getEditor();
+    if (!ed) return;
+    ed.on("selection-change", updateCurrentPage);
+    ed.on("text-change", updateCurrentPage);
+    return () => {
+      ed.off("selection-change", updateCurrentPage);
+      ed.off("text-change", updateCurrentPage);
+    };
+  }, [updateCurrentPage]);
 
   const navigate = useNavigate();
 
@@ -342,6 +414,10 @@ const shareDoc = async () => {
   const recipientEmail = prompt("Enter receiver email");
   if (!recipientEmail) return;
 
+  const permChoice = prompt("Permission — type VIEW or EDIT:", "VIEW");
+  if (!permChoice) return;
+  const permission = permChoice.trim().toUpperCase() === "EDIT" ? "EDIT" : "VIEW";
+
   if (!content || content === "<p><br></p>") {
     showStatus("Cannot share an empty document");
     return;
@@ -383,9 +459,10 @@ const shareDoc = async () => {
       fileId: file._id,
       recipientEmail: recipientEmail.toLowerCase(),
       aesKey: currentKey,
+      permission,
     });
 
-    showStatus(`🔒 Encrypted & shared with ${recipientEmail}`);
+    showStatus(`🔒 Encrypted & shared with ${recipientEmail} [${permission}]`);
   } catch (err) {
     console.error("Share error:", err.response?.data || err);
     showStatus(err.response?.data?.error || "Share failed");
@@ -423,9 +500,55 @@ const shareDoc = async () => {
         }
         .ql-page-break {
           border: none;
-          border-top: 2px dashed #94a3b8;
-          margin: 24px 0;
+          height: 40px;
+          margin: 0;
+          display: block;
+          position: relative;
+          background: #e5e7eb;
           page-break-after: always;
+        }
+        .ql-page-break::before {
+          content: '--- Page Break ---';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 10px;
+          color: #94a3b8;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+          pointer-events: none;
+        }
+        .ql-page-break::after {
+          content: '';
+          position: absolute;
+          left: 10%;
+          right: 10%;
+          top: 50%;
+          border-top: 2px dashed #94a3b8;
+          pointer-events: none;
+        }
+        .page-boundary-marker {
+          position: absolute;
+          left: 0;
+          right: 0;
+          height: 28px;
+          background: #e5e7eb;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          z-index: 5;
+          box-shadow: inset 0 4px 6px -4px rgba(0,0,0,0.1), inset 0 -4px 6px -4px rgba(0,0,0,0.1);
+        }
+        .page-boundary-marker span {
+          font-size: 9px;
+          color: #94a3b8;
+          font-weight: 600;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+          background: #e5e7eb;
+          padding: 0 12px;
         }
         .ql-table-embed {
           margin: 12px 0;
@@ -554,51 +677,83 @@ const shareDoc = async () => {
           )}
 
           <div
-            style={{
-              ...styles.editorWrap,
-              width:
-                viewSettings.viewMode === "web" ? "100%" :
-                pageSettings.orientation === "landscape"
-                  ? pageSettings.height
-                  : pageSettings.width,
-              minHeight:
-                viewSettings.viewMode === "web" ? "auto" :
-                pageSettings.orientation === "landscape"
-                  ? pageSettings.width
-                  : pageSettings.height,
-              background: pageSettings.pageColor,
-              border: pageSettings.pageBorder,
-              transform: `scale(${viewSettings.zoom / 100})`,
-              transformOrigin: "top center",
-              columnCount: pageSettings.columns,
-              columnGap: pageSettings.columns > 1 ? "24px" : "0",
-              ...(viewSettings.gridlines
-                ? {
-                    backgroundImage:
-                      "linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px)",
-                    backgroundSize: "20px 20px",
-                  }
-                : {}),
-              ...(viewSettings.viewMode === "focus"
-                ? {
-                    maxWidth: 700,
-                    boxShadow: "none",
-                    border: "none",
-                  }
-                : {}),
-            }}
+            style={(() => {
+              const pageH = viewSettings.viewMode === "web" ? null
+                : pageSettings.orientation === "landscape"
+                  ? pageSettings.width : pageSettings.height;
+
+              // Build background layers: page-break line + optional gridlines
+              let bgImages = [];
+              let bgSizes = [];
+              if (pageH && viewSettings.viewMode !== "web") {
+                bgImages.push(
+                  `repeating-linear-gradient(to bottom, transparent 0, transparent calc(${pageH} - 1px), #cbd5e1 calc(${pageH} - 1px), #cbd5e1 ${pageH})`
+                );
+                bgSizes.push(`100% ${pageH}`);
+              }
+              if (viewSettings.gridlines) {
+                bgImages.push(
+                  "linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px)",
+                  "linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px)"
+                );
+                bgSizes.push("20px 20px", "20px 20px");
+              }
+
+              return {
+                ...styles.editorWrap,
+                position: "relative",
+                width:
+                  viewSettings.viewMode === "web" ? "100%" :
+                  pageSettings.orientation === "landscape"
+                    ? pageSettings.height
+                    : pageSettings.width,
+                minHeight: pageH || "auto",
+                backgroundColor: pageSettings.pageColor,
+                ...(bgImages.length
+                  ? { backgroundImage: bgImages.join(", "), backgroundSize: bgSizes.join(", ") }
+                  : {}),
+                border: pageSettings.pageBorder,
+                transform: `scale(${viewSettings.zoom / 100})`,
+                transformOrigin: "top center",
+                columnCount: pageSettings.columns,
+                columnGap: pageSettings.columns > 1 ? "24px" : "0",
+                ...(viewSettings.viewMode === "focus"
+                  ? { maxWidth: 700, boxShadow: "none", border: "none" }
+                  : {}),
+              };
+            })()}
           >
             <ReactQuill
               ref={quillRef}
               value={content}
               onChange={setContent}
-              modules={{ toolbar: false, imageResize: {} }}
+              modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
               style={{
                 background: "transparent",
                 padding: pageSettings.margin,
                 minHeight: "100%",
               }}
             />
+            {/* Page boundary markers */}
+            {viewSettings.viewMode !== "web" && totalPages > 1 && (() => {
+              const pageH = pageSettings.orientation === "landscape"
+                ? pageSettings.width : pageSettings.height;
+              return Array.from({ length: totalPages - 1 }, (_, i) => (
+                <div
+                  key={i}
+                  className="page-boundary-marker"
+                  style={{ top: `calc(${(i + 1)} * ${pageH})` }}
+                >
+                  <span>Page {i + 2}</span>
+                </div>
+              ));
+            })()}
+          </div>
+
+          {/* Page status bar */}
+          <div style={styles.pageStatusBar}>
+            <span>Page {currentPage} of {totalPages}</span>
+            {status && <span style={styles.statusMsg}>{status}</span>}
           </div>
         </div>
       )}
@@ -699,5 +854,24 @@ const styles = {
     fontSize: 8,
     color: "#94a3b8",
     fontWeight: 500,
+  },
+  pageStatusBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    padding: "6px 16px",
+    marginTop: 8,
+    fontSize: 11,
+    color: "#64748b",
+    fontWeight: 500,
+    background: "#f1f5f9",
+    borderRadius: 4,
+    border: "1px solid #e2e8f0",
+    userSelect: "none",
+  },
+  statusMsg: {
+    color: "#2563eb",
+    fontWeight: 600,
   },
 };
