@@ -89,7 +89,7 @@ export default function Received() {
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => {
-                              let url = `/viewer?cid=${encodeURIComponent(cid)}&filename=${encodeURIComponent(filename)}`;
+                              let url = `/viewer?fileId=${file._id}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}&permission=${item.permission || "VIEW"}`;
                               if (encKey) url += `&encryptedKey=${encodeURIComponent(encKey)}`;
                               navigate(url);
                             }}

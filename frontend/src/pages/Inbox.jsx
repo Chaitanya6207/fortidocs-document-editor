@@ -51,6 +51,7 @@ export default function Inbox() {
                 const senderName = f?.ownerId?.name || f?.ownerId?.email || "-";
                 const hasCid = cid && cid !== "undefined";
                 const fileMongoId = f?.fileId?._id;
+                const permission = f?.permission || "VIEW";
 
                 return (
                   <tr key={f._id}>
@@ -71,7 +72,7 @@ export default function Inbox() {
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => {
-                              let url = `/viewer?fileId=${fileMongoId}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}`;
+                              let url = `/viewer?fileId=${fileMongoId}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}&permission=${permission}`;
                               navigate(url);
                             }}
                           >

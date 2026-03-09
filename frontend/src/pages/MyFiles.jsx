@@ -12,6 +12,7 @@ const ACTION_LABELS = {
   VIEWED: { label: "Viewed", color: "#0ea5e9", bg: "#f0f9ff", icon: "👁" },
   DOWNLOADED: { label: "Downloaded", color: "#ea580c", bg: "#fff7ed", icon: "⬇️" },
   DELETED: { label: "Deleted", color: "#dc2626", bg: "#fef2f2", icon: "🗑️" },
+  EDITED: { label: "Edited", color: "#f59e0b", bg: "#fffbeb", icon: "✏️" },
 };
 
 export default function MyFiles() {
