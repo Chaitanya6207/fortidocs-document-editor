@@ -1,55 +1,71 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import api from "../utils/api";
 
 /**
- * Viewer — session-based decryption (no MetaMask popup).
+ * Viewer — supports VIEW (read-only) and EDIT (editable with save) modes.
  *
  * URL params:
- *   fileId   — MongoDB _id of the File document (preferred, uses server-side decrypt)
- *   cid      — (optional fallback) IPFS CID  
- *   filename — display name
+ *   fileId     — MongoDB _id of the File document (preferred)
+ *   cid        — (optional fallback) IPFS CID
+ *   filename   — display name
+ *   permission — VIEW or EDIT
  */
 export default function Viewer() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const quillRef = useRef(null);
 
   const fileId = params.get("fileId");
   const cid = params.get("cid");
   const filename = params.get("filename") || "Shared Document";
+  const urlPermission = params.get("permission") || "VIEW";
 
   const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState("");
   const [isEncrypted, setIsEncrypted] = useState(false);
   const [displayCid, setDisplayCid] = useState(cid || "");
+  const [permission, setPermission] = useState(urlPermission);
+  const [dirty, setDirty] = useState(false);
+
+  const canEdit = permission === "EDIT";
+
+  // Track edits via ref to avoid controlled-component re-render loop
+  const currentContent = useRef("");
+
+  const handleEditorChange = useCallback((value) => {
+    currentContent.current = value;
+    setDirty(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadDocument = async () => {
       try {
-        // ──────────── SESSION-BASED DECRYPT (preferred) ────────────
         if (fileId) {
-          console.log("[Viewer] Loading via session-based decrypt, fileId:", fileId);
           const res = await api.get(`/api/doc/view/${fileId}`);
           if (cancelled) return;
 
-          const { html: docHtml, cid: docCid, encrypted } = res.data;
+          const { html: docHtml, cid: docCid, encrypted, permission: serverPerm } = res.data;
           setHtml(docHtml);
+          currentContent.current = docHtml;
           setIsEncrypted(!!encrypted);
           if (docCid) setDisplayCid(docCid);
+          if (serverPerm) setPermission(serverPerm);
           return;
         }
 
-        // ──────────── FALLBACK: direct IPFS fetch (unencrypted only) ────
         if (!cid) {
           setError("No file ID or CID provided.");
           return;
         }
 
-        console.log("[Viewer] Fetching CID:", cid);
         let data;
         try {
           const res = await api.get(`/api/doc/ipfs/${cid}`);
@@ -67,18 +83,13 @@ export default function Viewer() {
           return;
         }
 
-        if (data.content) {
-          setHtml(data.content);
-        } else if (typeof data === "string") {
-          setHtml(data);
-        } else {
-          setHtml(`<pre>${JSON.stringify(data, null, 2)}</pre>`);
-        }
+        const content = data.content || (typeof data === "string" ? data : `<pre>${JSON.stringify(data, null, 2)}</pre>`);
+        setHtml(content);
+        currentContent.current = content;
       } catch (err) {
         console.error("[Viewer] Load error:", err);
         if (!cancelled) {
-          const msg = err.response?.data?.error || "Failed to load document.";
-          setError(msg);
+          setError(err.response?.data?.error || "Failed to load document.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -88,6 +99,26 @@ export default function Viewer() {
     loadDocument();
     return () => { cancelled = true; };
   }, [fileId, cid]);
+
+  const saveEdits = async () => {
+    if (!fileId || !canEdit) return;
+    try {
+      setSaving(true);
+      setStatus("Saving edits…");
+      const res = await api.post(`/api/doc/edit/${fileId}`, { content: currentContent.current });
+      setDisplayCid(res.data.cid || displayCid);
+      setHtml(currentContent.current);
+      setDirty(false);
+      setStatus("✅ Edits saved successfully!");
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      console.error("Save edit error:", err);
+      setStatus(err.response?.data?.error || "Failed to save edits");
+      setTimeout(() => setStatus(""), 4000);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div style={styles.wrapper}>
@@ -102,6 +133,13 @@ export default function Viewer() {
           <div>
             <div style={styles.filename}>
               {isEncrypted && "🔐 "}{filename}
+              <span style={{
+                ...styles.permBadge,
+                background: canEdit ? "#dcfce7" : "#dbeafe",
+                color: canEdit ? "#16a34a" : "#2563eb",
+              }}>
+                {canEdit ? "✏️ EDIT" : "👁 VIEW"}
+              </span>
             </div>
             <div style={styles.cidLabel}>
               {displayCid ? `CID: ${displayCid.substring(0, 16)}…` : ""}
@@ -111,6 +149,17 @@ export default function Viewer() {
         </div>
 
         <div style={styles.topActions}>
+          {status && <span style={styles.statusBadge}>{status}</span>}
+          {canEdit && (
+            <button
+              className="btn btn-success btn-sm"
+              onClick={saveEdits}
+              disabled={saving || !dirty}
+              style={{ opacity: dirty ? 1 : 0.5 }}
+            >
+              {saving ? "Saving…" : "💾 Save"}
+            </button>
+          )}
           {displayCid && (
             <button
               className="btn btn-ghost btn-sm"
@@ -121,16 +170,6 @@ export default function Viewer() {
               Copy Link
             </button>
           )}
-          {!isEncrypted && displayCid && (
-            <a
-              href={`https://gateway.pinata.cloud/ipfs/${displayCid}`}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-ghost btn-sm"
-            >
-              View Raw
-            </a>
-          )}
         </div>
       </div>
 
@@ -138,9 +177,7 @@ export default function Viewer() {
       {loading && (
         <div style={styles.center}>
           <div className="spinner" />
-          <p style={{ marginTop: 12, color: "#64748b" }}>
-            Loading document…
-          </p>
+          <p style={{ marginTop: 12, color: "#64748b" }}>Loading document…</p>
         </div>
       )}
 
@@ -152,7 +189,7 @@ export default function Viewer() {
         </div>
       )}
 
-      {!loading && !error && (
+      {!loading && !error && !canEdit && (
         <div style={styles.pageWrap}>
           <div className="ql-snow" style={styles.page}>
             <div
@@ -162,9 +199,36 @@ export default function Viewer() {
           </div>
         </div>
       )}
+
+      {!loading && !error && canEdit && (
+        <div style={styles.pageWrap}>
+          <div style={styles.page}>
+            <ReactQuill
+              ref={quillRef}
+              theme="snow"
+              value={html}
+              onChange={handleEditorChange}
+              modules={editorModules}
+              style={{ minHeight: "100%", background: "transparent" }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const editorModules = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    ["bold", "italic", "underline", "strike"],
+    [{ color: [] }, { background: [] }],
+    [{ list: "ordered" }, { list: "bullet" }],
+    [{ align: [] }],
+    ["link", "image"],
+    ["clean"],
+  ],
+};
 
 const styles = {
   wrapper: {
@@ -195,15 +259,34 @@ const styles = {
   filename: {
     fontWeight: 600,
     fontSize: 15,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
   },
   cidLabel: {
     fontSize: 11,
     color: "#64748b",
     fontFamily: "monospace",
   },
+  permBadge: {
+    fontSize: 10,
+    fontWeight: 700,
+    padding: "2px 8px",
+    borderRadius: 12,
+    letterSpacing: "0.04em",
+  },
   topActions: {
     display: "flex",
     gap: 8,
+    alignItems: "center",
+  },
+  statusBadge: {
+    background: "rgba(37, 99, 235, 0.15)",
+    color: "#93c5fd",
+    padding: "5px 14px",
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: 500,
   },
   center: {
     display: "flex",
