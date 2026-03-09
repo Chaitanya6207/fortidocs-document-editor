@@ -19,11 +19,13 @@ router.post("/", auth, async (req, res) => {
     console.log("📩 SHARE BODY:", req.body);
     console.log("👤 USER:", req.user);
 
-    const { fileId, recipientEmail, encryptedKey, aesKey } = req.body;
+    const { fileId, recipientEmail, encryptedKey, aesKey, permission } = req.body;
 
     if (!fileId || !recipientEmail) {
       return res.status(400).json({ error: "Missing fileId or recipientEmail" });
     }
+
+    const perm = (permission === "EDIT") ? "EDIT" : "VIEW";
 
     const file = await File.findById(fileId);
     if (!file) {
@@ -43,7 +45,7 @@ router.post("/", auth, async (req, res) => {
       fileId: file._id,
       ownerId: req.user.id,
       recipientEmail: recipientEmail.trim().toLowerCase(),
-      permission: "VIEW",
+      permission: perm,
       encryptedKey: encryptedKey || "",
       serverEncryptedKey: srvKey,
     });
@@ -55,7 +57,7 @@ router.post("/", auth, async (req, res) => {
       fileId: file._id,
       userId: req.user.id,
       action: "SHARED",
-      details: `Shared with ${recipientEmail.trim().toLowerCase()}${encryptedKey ? " [encrypted]" : ""}`,
+      details: `Shared with ${recipientEmail.trim().toLowerCase()} [${perm}]${encryptedKey ? " [encrypted]" : ""}`,
     });
 
     res.json(access);

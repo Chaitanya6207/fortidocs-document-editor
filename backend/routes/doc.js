@@ -129,6 +129,7 @@ router.get("/view/:fileId", auth, async (req, res) => {
     // 2. Check authorization: owner or shared-with recipient
     let serverKey = "";
     const isOwner = file.ownerId.toString() === userId;
+    let permission = "EDIT"; // owners have full access
 
     if (isOwner) {
       serverKey = file.serverEncryptedKey;
@@ -142,7 +143,19 @@ router.get("/view/:fileId", auth, async (req, res) => {
         return res.status(403).json({ error: "You don't have access to this file" });
       }
       serverKey = access.serverEncryptedKey;
+      permission = access.permission || "VIEW";
     }
+
+    // Log that the user opened/viewed this file
+    await ActivityLog.create({
+      fileId: file._id,
+      userId: req.user.id,
+      action: "OPENED",
+      details: isOwner
+        ? `Owner opened "${file.filename}"`
+        : `${userEmail} opened shared file "${file.filename}"`,
+      ipAddress: req.ip || "",
+    });
 
     // 3. Fetch content from IPFS
     const gateways = [
@@ -187,7 +200,7 @@ router.get("/view/:fileId", auth, async (req, res) => {
           return res.status(500).json({ error: "Decryption produced empty result" });
         }
 
-        return res.json({ html, filename: file.filename, cid: file.cid, encrypted: true });
+        return res.json({ html, filename: file.filename, cid: file.cid, encrypted: true, permission });
       } catch (decErr) {
         console.error("Server decryption failed:", decErr.message);
         return res.status(500).json({ error: "Failed to decrypt document" });
@@ -196,11 +209,92 @@ router.get("/view/:fileId", auth, async (req, res) => {
 
     // 5. Unencrypted document
     const html = ipfsData.content || (typeof ipfsData === "string" ? ipfsData : JSON.stringify(ipfsData));
-    return res.json({ html, filename: file.filename, cid: file.cid, encrypted: false });
+    return res.json({ html, filename: file.filename, cid: file.cid, encrypted: false, permission });
 
   } catch (err) {
     console.error("VIEW ERROR:", err);
     res.status(500).json({ error: "Failed to load document" });
+  }
+});
+
+/**
+ * POST /api/doc/edit/:fileId
+ * Save edits made by a shared user with EDIT permission.
+ * Re-encrypts content and pins to IPFS, updates File record, logs the edit.
+ */
+router.post("/edit/:fileId", auth, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const userId = req.user.id;
+    const userEmail = (req.user.email || "").trim().toLowerCase();
+    const { content } = req.body;
+
+    if (!content) {
+      return res.status(400).json({ error: "Content is required" });
+    }
+
+    const file = await File.findById(fileId);
+    if (!file) return res.status(404).json({ error: "File not found" });
+
+    const isOwner = file.ownerId.toString() === userId;
+
+    // Non-owners must have EDIT permission
+    let serverKey = "";
+    if (isOwner) {
+      serverKey = file.serverEncryptedKey;
+    } else {
+      const access = await FileAccess.findOne({
+        fileId: file._id,
+        recipientEmail: userEmail,
+      });
+      if (!access) {
+        return res.status(403).json({ error: "You don't have access to this file" });
+      }
+      if (access.permission !== "EDIT") {
+        return res.status(403).json({ error: "You only have VIEW permission for this file" });
+      }
+      serverKey = access.serverEncryptedKey;
+    }
+
+    // Build IPFS payload
+    let ipfsPayload;
+    if (file.encrypted && serverKey) {
+      // Re-encrypt with the same AES key
+      const rawAesKey = serverDecrypt(serverKey);
+      const CryptoJS = require("crypto-js");
+      const encryptedContent = CryptoJS.AES.encrypt(content, rawAesKey).toString();
+      ipfsPayload = {
+        type: "encrypted-document",
+        encryptedContent,
+        createdAt: new Date(),
+      };
+    } else {
+      ipfsPayload = {
+        type: "document",
+        content,
+        createdAt: new Date(),
+      };
+    }
+
+    const cid = await pinJSONToIPFS(ipfsPayload);
+
+    // Update file record with new CID
+    file.cid = cid;
+    await file.save();
+
+    // Log the edit with clear details
+    await ActivityLog.create({
+      fileId: file._id,
+      userId,
+      action: "EDITED",
+      details: `${isOwner ? "Owner" : userEmail} edited "${file.filename}" (new CID: ${cid.substring(0, 16)}…)`,
+      ipAddress: req.ip || "",
+    });
+
+    res.json({ message: "Document saved successfully", cid, filename: file.filename });
+  } catch (err) {
+    console.error("EDIT ERROR:", err);
+    res.status(500).json({ error: "Failed to save edits" });
   }
 });
 
