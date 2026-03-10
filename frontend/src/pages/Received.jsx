@@ -89,13 +89,23 @@ export default function Received() {
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => {
-                              let url = `/viewer?fileId=${file._id}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}&permission=${item.permission || "VIEW"}`;
+                              let url = `/viewer?fileId=${file._id}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}&permission=VIEW`;
                               if (encKey) url += `&encryptedKey=${encodeURIComponent(encKey)}`;
                               navigate(url);
                             }}
                           >
-                            Open
+                            👁 View
                           </button>
+                          {(item.permission || "VIEW") === "EDIT" && (
+                            <button
+                              className="btn btn-success btn-sm"
+                              onClick={() => {
+                                navigate(`/editor?sharedFileId=${file._id}&filename=${encodeURIComponent(filename)}`);
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>
+                          )}
                           <button
                             className="btn btn-ghost btn-sm"
                             onClick={() =>

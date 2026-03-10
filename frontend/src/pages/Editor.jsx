@@ -14,7 +14,7 @@ import Sent from "./Sent";
 import Inbox from "./Inbox";
 import MyFiles from "./MyFiles";
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
 import { saveAs } from "file-saver";
 
@@ -189,6 +189,13 @@ export default function Editor() {
   const [docName, setDocName] = useState("");
   const [aesKey, setAesKey] = useState(""); // current doc's AES key (in memory only)
 
+  /* ---------- SHARED FILE EDITING ---------- */
+  const [searchParams] = useSearchParams();
+  const sharedFileId = searchParams.get("sharedFileId");
+  const sharedFilename = searchParams.get("filename");
+  const [isSharedEdit, setIsSharedEdit] = useState(false);
+  const [sharedFileLoading, setSharedFileLoading] = useState(false);
+
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
     margin: "40px",
@@ -273,6 +280,39 @@ export default function Editor() {
 
   const navigate = useNavigate();
 
+  /* ---------- LOAD SHARED FILE FOR EDITING ---------- */
+  useEffect(() => {
+    if (!sharedFileId) return;
+    let cancelled = false;
+    setSharedFileLoading(true);
+    setStatus("Loading shared document…");
+
+    api.get(`/api/doc/view/${sharedFileId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const { html, filename, permission } = res.data;
+        if (permission !== "EDIT") {
+          setStatus("You only have VIEW permission for this file");
+          setSharedFileLoading(false);
+          return;
+        }
+        setContent(html);
+        setDocName(filename ? filename.replace(/\.[^.]+$/, "") : (sharedFilename || "Shared Document"));
+        setIsSharedEdit(true);
+        setStatus(`Editing shared file: "${filename || sharedFilename}"`);
+        setTimeout(() => setStatus(""), 3000);
+      })
+      .catch((err) => {
+        console.error("Failed to load shared file:", err);
+        if (!cancelled) setStatus(err.response?.data?.error || "Failed to load shared document");
+      })
+      .finally(() => {
+        if (!cancelled) setSharedFileLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [sharedFileId, sharedFilename]);
+
   const askForName = (defaultName = "") => {
     const name = prompt("Enter a name for your document:", defaultName);
     if (name && name.trim()) {
@@ -327,6 +367,20 @@ export default function Editor() {
       return;
     }
 
+    // --- SHARED FILE EDIT SAVE ---
+    if (isSharedEdit && sharedFileId) {
+      try {
+        showStatus("Saving edits to shared document…");
+        const res = await api.post(`/api/doc/edit/${sharedFileId}`, { content });
+        showStatus(`✅ Edits saved! CID: ${res.data.cid?.substring(0, 12)}…`);
+      } catch (err) {
+        console.error("Shared edit save error:", err);
+        showStatus(err.response?.data?.error || "Failed to save edits");
+      }
+      return;
+    }
+
+    // --- NORMAL SAVE ---
     let name = docName;
     if (!name) {
       name = askForName();
@@ -593,11 +647,33 @@ const shareDoc = async () => {
           <span style={styles.logo}>FortiDocs</span>
           <span style={styles.headerDivider}>|</span>
           <span style={styles.userName}>{docName || "Untitled Document"}</span>
+          {isSharedEdit && (
+            <span style={{
+              background: "rgba(34, 197, 94, 0.2)",
+              color: "#4ade80",
+              padding: "3px 10px",
+              borderRadius: 12,
+              fontSize: 11,
+              fontWeight: 600,
+              marginLeft: 8,
+            }}>
+              ✏️ Editing Shared File
+            </span>
+          )}
         </div>
         {status && (
           <div style={styles.statusBadge}>{status}</div>
         )}
         <div style={styles.headerRight}>
+          {isSharedEdit && (
+            <button
+              onClick={saveDoc}
+              className="btn btn-success btn-sm"
+              style={{ fontWeight: 600 }}
+            >
+              💾 Save to Cloud
+            </button>
+          )}
           <span style={styles.userBadge}>👤 {user?.name || user?.email || "User"}</span>
           <button onClick={logout} className="btn btn-danger btn-sm">
             Logout
@@ -655,8 +731,16 @@ const shareDoc = async () => {
       {/* MY FILES */}
       {activeTab === "My Files" && <MyFiles />}
 
+      {/* SHARED FILE LOADING STATE */}
+      {sharedFileLoading && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 12 }}>
+          <div className="spinner" />
+          <p style={{ color: "#64748b", fontSize: 14 }}>Loading shared document…</p>
+        </div>
+      )}
+
       {/* DOCUMENT EDITOR (ONLY WHEN EDITING) */}
-      {["File", "Home", "Insert", "Layout", "View"].includes(activeTab) && (
+      {!sharedFileLoading && ["File", "Home", "Insert", "Layout", "View"].includes(activeTab) && (
         <div
           style={{
             ...styles.pageWrap,

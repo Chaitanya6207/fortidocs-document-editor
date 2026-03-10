@@ -72,12 +72,22 @@ export default function Inbox() {
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => {
-                              let url = `/viewer?fileId=${fileMongoId}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}&permission=${permission}`;
+                              let url = `/viewer?fileId=${fileMongoId}&filename=${encodeURIComponent(filename)}&cid=${encodeURIComponent(cid)}&permission=VIEW`;
                               navigate(url);
                             }}
                           >
-                            Open
+                            👁 View
                           </button>
+                          {permission === "EDIT" && (
+                            <button
+                              className="btn btn-success btn-sm"
+                              onClick={() => {
+                                navigate(`/editor?sharedFileId=${fileMongoId}&filename=${encodeURIComponent(filename)}`);
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>
+                          )}
                           <button
                             className="btn btn-ghost btn-sm"
                             onClick={() => {
