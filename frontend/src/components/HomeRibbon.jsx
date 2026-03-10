@@ -281,6 +281,26 @@ export default function HomeRibbon({ editor }) {
 
       <div style={styles.sep} />
 
+      {/* ===== PAGES ===== */}
+      <div style={styles.group}>
+        <div style={styles.row}>
+          <button
+            style={styles.toolBtn}
+            onClick={() => {
+              const range = editor.getSelection(true);
+              editor.insertEmbed(range.index, "pageBreak", true, "user");
+              editor.setSelection(range.index + 1);
+            }}
+            title="Insert Page Break"
+          >
+            📄 New Page
+          </button>
+        </div>
+        <div style={styles.label}>Pages</div>
+      </div>
+
+      <div style={styles.sep} />
+
       {/* ===== FIND & REPLACE ===== */}
       <div style={{ ...styles.group, position: "relative" }}>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>

@@ -278,16 +278,32 @@ router.post("/edit/:fileId", auth, async (req, res) => {
 
     const cid = await pinJSONToIPFS(ipfsPayload);
 
-    // Update file record with new CID
+    const oldCid = file.cid;
+
+    // Update file record with new CID (replaces old version)
     file.cid = cid;
     await file.save();
 
-    // Log the edit with clear details
+    // Build detailed modification summary
+    const contentLength = content.length;
+    const plainText = content.replace(/<[^>]*>/g, "");
+    const wordCount = plainText.trim().split(/\s+/).filter(Boolean).length;
+    const editedBy = isOwner ? "Owner" : userEmail;
+    const detailParts = [
+      `${editedBy} edited "${file.filename}"`,
+      `Words: ${wordCount}`,
+      `Content size: ${(contentLength / 1024).toFixed(1)} KB`,
+      `Previous CID: ${oldCid ? oldCid.substring(0, 16) + "…" : "none"}`,
+      `New CID: ${cid.substring(0, 16)}…`,
+      `Timestamp: ${new Date().toISOString()}`,
+    ];
+
+    // Log the edit with detailed info
     await ActivityLog.create({
       fileId: file._id,
       userId,
       action: "EDITED",
-      details: `${isOwner ? "Owner" : userEmail} edited "${file.filename}" (new CID: ${cid.substring(0, 16)}…)`,
+      details: detailParts.join(" | "),
       ipAddress: req.ip || "",
     });
 

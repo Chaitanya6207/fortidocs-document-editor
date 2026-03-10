@@ -183,11 +183,13 @@ Quill.register(CalloutEmbed);
 
 export default function Editor() {
   const quillRef = useRef(null);
+  const pageWrapRef = useRef(null);
   const [content, setContent] = useState("");
   const [activeTab, setActiveTab] = useState("Home");
   const [status, setStatus] = useState("");
   const [docName, setDocName] = useState("");
   const [aesKey, setAesKey] = useState(""); // current doc's AES key (in memory only)
+  const [showPagePanel, setShowPagePanel] = useState(true);
 
   /* ---------- SHARED FILE EDITING ---------- */
   const [searchParams] = useSearchParams();
@@ -195,6 +197,8 @@ export default function Editor() {
   const sharedFilename = searchParams.get("filename");
   const [isSharedEdit, setIsSharedEdit] = useState(false);
   const [sharedFileLoading, setSharedFileLoading] = useState(false);
+  const sharedEditRef = useRef(false);
+  const sharedFileIdRef = useRef(sharedFileId);
 
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
@@ -278,6 +282,15 @@ export default function Editor() {
     };
   }, [updateCurrentPage]);
 
+  /* ---------- SCROLL TO PAGE ---------- */
+  const scrollToPage = useCallback((pageNum) => {
+    const wrapEl = pageWrapRef.current;
+    if (!wrapEl || !pageHeightRef.current) return;
+    const gapPerPage = 48;
+    const targetTop = (pageNum - 1) * (pageHeightRef.current + gapPerPage);
+    wrapEl.scrollTo({ top: targetTop, behavior: "smooth" });
+  }, []);
+
   const navigate = useNavigate();
 
   /* ---------- LOAD SHARED FILE FOR EDITING ---------- */
@@ -299,6 +312,8 @@ export default function Editor() {
         setContent(html);
         setDocName(filename ? filename.replace(/\.[^.]+$/, "") : (sharedFilename || "Shared Document"));
         setIsSharedEdit(true);
+        sharedEditRef.current = true;
+        sharedFileIdRef.current = sharedFileId;
         setStatus(`Editing shared file: "${filename || sharedFilename}"`);
         setTimeout(() => setStatus(""), 3000);
       })
@@ -368,10 +383,12 @@ export default function Editor() {
     }
 
     // --- SHARED FILE EDIT SAVE ---
-    if (isSharedEdit && sharedFileId) {
+    const isShared = sharedEditRef.current;
+    const fileId = sharedFileIdRef.current;
+    if (isShared && fileId) {
       try {
         showStatus("Saving edits to shared document…");
-        const res = await api.post(`/api/doc/edit/${sharedFileId}`, { content });
+        const res = await api.post(`/api/doc/edit/${fileId}`, { content });
         showStatus(`✅ Edits saved! CID: ${res.data.cid?.substring(0, 12)}…`);
       } catch (err) {
         console.error("Shared edit save error:", err);
@@ -582,18 +599,49 @@ const shareDoc = async () => {
           border-top: 2px dashed #94a3b8;
           pointer-events: none;
         }
+        /* Auto page overflow styling */
+        .ql-editor {
+          overflow-wrap: break-word;
+          word-wrap: break-word;
+        }
+        @media print {
+          .ql-page-break {
+            page-break-after: always;
+            break-after: page;
+          }
+          .ql-editor {
+            overflow: visible !important;
+          }
+        }
         .page-boundary-marker {
           position: absolute;
-          left: 0;
-          right: 0;
-          height: 28px;
+          left: -24px;
+          right: -24px;
+          height: 48px;
           background: #e5e7eb;
           display: flex;
           align-items: center;
           justify-content: center;
           pointer-events: none;
-          z-index: 5;
-          box-shadow: inset 0 4px 6px -4px rgba(0,0,0,0.1), inset 0 -4px 6px -4px rgba(0,0,0,0.1);
+          z-index: 10;
+        }
+        .page-boundary-marker::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 24px;
+          right: 24px;
+          height: 8px;
+          background: linear-gradient(to bottom, rgba(0,0,0,0.08), transparent);
+        }
+        .page-boundary-marker::after {
+          content: '';
+          position: absolute;
+          bottom: 0;
+          left: 24px;
+          right: 24px;
+          height: 8px;
+          background: linear-gradient(to top, rgba(0,0,0,0.08), transparent);
         }
         .page-boundary-marker span {
           font-size: 9px;
@@ -601,8 +649,10 @@ const shareDoc = async () => {
           font-weight: 600;
           letter-spacing: 1px;
           text-transform: uppercase;
-          background: #e5e7eb;
-          padding: 0 12px;
+          background: #d1d5db;
+          padding: 2px 16px;
+          border-radius: 10px;
+          z-index: 1;
         }
         .ql-table-embed {
           margin: 12px 0;
@@ -741,14 +791,113 @@ const shareDoc = async () => {
 
       {/* DOCUMENT EDITOR (ONLY WHEN EDITING) */}
       {!sharedFileLoading && ["File", "Home", "Insert", "Layout", "View"].includes(activeTab) && (
-        <div
-          style={{
-            ...styles.pageWrap,
-            ...(viewSettings.darkMode
-              ? { background: "#1e293b" }
-              : {}),
-          }}
-        >
+        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+          {/* Page Thumbnail Panel */}
+          {showPagePanel && (
+            <div style={styles.pagePanel}>
+              <div style={styles.pagePanelHeader}>
+                <span style={styles.pagePanelTitle}>Pages</span>
+                <button
+                  style={styles.pagePanelClose}
+                  onClick={() => setShowPagePanel(false)}
+                  title="Close panel"
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={styles.pagePanelList}>
+                {Array.from({ length: totalPages }, (_, i) => {
+                  const pageNum = i + 1;
+                  const isActive = currentPage === pageNum;
+                  return (
+                    <button
+                      key={pageNum}
+                      style={{
+                        ...styles.pageThumbnail,
+                        ...(isActive ? styles.pageThumbnailActive : {}),
+                      }}
+                      onClick={() => scrollToPage(pageNum)}
+                      title={`Go to page ${pageNum}`}
+                    >
+                      <div style={styles.pageThumbnailInner}>
+                        <div
+                          className="ql-snow"
+                          style={styles.pageThumbnailContent}
+                        >
+                          <div
+                            className="ql-editor"
+                            style={{
+                              fontSize: "1.6px",
+                              lineHeight: "1.4",
+                              padding: "3px",
+                              overflow: "hidden",
+                              pointerEvents: "none",
+                              maxHeight: "100%",
+                            }}
+                            dangerouslySetInnerHTML={{
+                              __html: (() => {
+                                if (!content) return "";
+                                const div = document.createElement("div");
+                                div.innerHTML = content;
+                                const allNodes = div.querySelectorAll("*");
+                                // Rough split: each page ~ equal portion of content
+                                const totalChars = div.textContent.length || 1;
+                                const charsPerPage = Math.ceil(totalChars / totalPages);
+                                const startChar = (pageNum - 1) * charsPerPage;
+                                const endChar = pageNum * charsPerPage;
+                                // Simple: return full HTML for page 1 thumbnail, sliced for others
+                                if (totalPages === 1) return content;
+                                // Extract approximate slice for this page
+                                let charCount = 0;
+                                let result = "";
+                                for (const child of div.childNodes) {
+                                  const nodeText = child.textContent || "";
+                                  const nodeEnd = charCount + nodeText.length;
+                                  if (nodeEnd > startChar && charCount < endChar) {
+                                    result += child.outerHTML || child.textContent;
+                                  }
+                                  charCount = nodeEnd;
+                                  if (charCount >= endChar) break;
+                                }
+                                return result;
+                              })(),
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <span style={{
+                        ...styles.pageThumbnailLabel,
+                        ...(isActive ? { color: "#2563eb", fontWeight: 700 } : {}),
+                      }}>
+                        {pageNum}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Toggle panel button when hidden */}
+          {!showPagePanel && (
+            <button
+              style={styles.pagePanelToggle}
+              onClick={() => setShowPagePanel(true)}
+              title="Show page panel"
+            >
+              📄
+            </button>
+          )}
+
+          <div
+            ref={pageWrapRef}
+            style={{
+              ...styles.pageWrap,
+              ...(viewSettings.darkMode
+                ? { background: "#1e293b" }
+                : {}),
+            }}
+          >
           {/* Ruler */}
           {viewSettings.ruler && (
             <div style={styles.ruler}>
@@ -792,6 +941,7 @@ const shareDoc = async () => {
                     ? pageSettings.height
                     : pageSettings.width,
                 minHeight: pageH || "auto",
+                paddingBottom: totalPages > 1 ? `${(totalPages - 1) * 48}px` : 0,
                 backgroundColor: pageSettings.pageColor,
                 ...(bgImages.length
                   ? { backgroundImage: bgImages.join(", "), backgroundSize: bgSizes.join(", ") }
@@ -818,7 +968,7 @@ const shareDoc = async () => {
                 minHeight: "100%",
               }}
             />
-            {/* Page boundary markers */}
+            {/* Page boundary markers with visual gap */}
             {viewSettings.viewMode !== "web" && totalPages > 1 && (() => {
               const pageH = pageSettings.orientation === "landscape"
                 ? pageSettings.width : pageSettings.height;
@@ -826,7 +976,7 @@ const shareDoc = async () => {
                 <div
                   key={i}
                   className="page-boundary-marker"
-                  style={{ top: `calc(${(i + 1)} * ${pageH})` }}
+                  style={{ top: `calc(${(i + 1)} * ${pageH} + ${i * 48}px)` }}
                 >
                   <span>Page {i + 2}</span>
                 </div>
@@ -838,6 +988,7 @@ const shareDoc = async () => {
           <div style={styles.pageStatusBar}>
             <span>Page {currentPage} of {totalPages}</span>
             {status && <span style={styles.statusMsg}>{status}</span>}
+          </div>
           </div>
         </div>
       )}
@@ -909,11 +1060,106 @@ const styles = {
     overflowY: "auto",
     transition: "background 0.3s ease",
   },
+  /* Page Thumbnail Panel */
+  pagePanel: {
+    width: 140,
+    minWidth: 140,
+    background: "#f8fafc",
+    borderRight: "1px solid #e2e8f0",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  pagePanelHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "8px 10px",
+    borderBottom: "1px solid #e2e8f0",
+    background: "#fff",
+  },
+  pagePanelTitle: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  },
+  pagePanelClose: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: "#94a3b8",
+    fontSize: 12,
+    padding: "2px 4px",
+    borderRadius: 4,
+    lineHeight: 1,
+  },
+  pagePanelList: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "8px 10px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    alignItems: "center",
+  },
+  pageThumbnail: {
+    width: 110,
+    cursor: "pointer",
+    background: "none",
+    border: "2px solid transparent",
+    borderRadius: 6,
+    padding: 3,
+    transition: "all 0.15s ease",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+  },
+  pageThumbnailActive: {
+    borderColor: "#2563eb",
+    background: "#eff6ff",
+  },
+  pageThumbnailInner: {
+    width: "100%",
+    aspectRatio: "210 / 297",
+    background: "#fff",
+    borderRadius: 3,
+    boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+    overflow: "hidden",
+    position: "relative",
+  },
+  pageThumbnailContent: {
+    width: "100%",
+    height: "100%",
+    overflow: "hidden",
+    pointerEvents: "none",
+  },
+  pageThumbnailLabel: {
+    fontSize: 10,
+    color: "#64748b",
+    fontWeight: 500,
+  },
+  pagePanelToggle: {
+    width: 32,
+    minWidth: 32,
+    background: "#f8fafc",
+    border: "none",
+    borderRight: "1px solid #e2e8f0",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    paddingTop: 12,
+    fontSize: 16,
+  },
   editorWrap: {
     background: "#fff",
     boxShadow: "0 2px 16px rgba(0,0,0,0.08)",
     borderRadius: 4,
     transition: "all 0.3s ease",
+    overflow: "hidden",
   },
   ruler: {
     display: "flex",
