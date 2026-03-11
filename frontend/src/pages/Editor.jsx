@@ -191,6 +191,22 @@ export default function Editor() {
   const [aesKey, setAesKey] = useState(""); // current doc's AES key (in memory only)
   const [showPagePanel, setShowPagePanel] = useState(true);
 
+  /* ---------- HEADER & FOOTER SETTINGS ---------- */
+  const [headerFooter, setHeaderFooter] = useState({
+    enabled: false,
+    headerLeft: "",
+    headerCenter: "",
+    headerRight: "",
+    footerLeft: "",
+    footerCenter: "",
+    footerRight: "",
+    showPageNumbers: false,
+    pageNumberPosition: "footer-center", // footer-center, footer-right, header-right
+    differentFirstPage: false,
+    firstPageHeaderCenter: "",
+    firstPageFooterCenter: "",
+  });
+
   /* ---------- SHARED FILE EDITING ---------- */
   const [searchParams] = useSearchParams();
   const sharedFileId = searchParams.get("sharedFileId");
@@ -222,7 +238,17 @@ export default function Editor() {
   /* ---------- PAGE COUNT TRACKING ---------- */
   const [totalPages, setTotalPages] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
+  const [activePage, setActivePage] = useState(0); // 0-indexed: which page card holds the real editor
   const pageHeightRef = useRef(0);
+  const contentHeightRef = useRef(0); // usable content height per page
+  const HF_ZONE_HEIGHT = 32; // px - height for each header/footer strip
+  const PAGE_GAP = 40; // px - visual gap between page cards
+
+  // Parse margin string (e.g. "40px") to px number
+  const getMarginPx = useCallback(() => {
+    const val = parseFloat(pageSettings.margin) || 40;
+    return val;
+  }, [pageSettings.margin]);
 
   // Measure page height in px from the CSS mm value
   const measurePageHeightPx = useCallback(() => {
@@ -241,54 +267,130 @@ export default function Editor() {
     return px;
   }, [pageSettings.orientation, pageSettings.width, pageSettings.height]);
 
-  // Track content height → total pages
+  // Calculate the usable content area per page
+  const calcContentHeightPerPage = useCallback(() => {
+    const pageH = measurePageHeightPx();
+    const marginPx = getMarginPx();
+    let contentH = pageH - marginPx * 2;
+    if (headerFooter.enabled) {
+      contentH -= HF_ZONE_HEIGHT * 2;
+    }
+    return Math.max(contentH, 100);
+  }, [measurePageHeightPx, getMarginPx, headerFooter.enabled]);
+
+  // Measure content height → total pages
   useEffect(() => {
     const editorEl = quillRef.current?.getEditor()?.root;
     if (!editorEl) return;
 
     const update = () => {
       const ph = measurePageHeightPx();
+      const ch = calcContentHeightPerPage();
       pageHeightRef.current = ph;
-      if (ph > 0) {
-        setTotalPages(Math.max(1, Math.ceil(editorEl.scrollHeight / ph)));
-      }
+      contentHeightRef.current = ch;
+      if (ch <= 0) return;
+      const scrollH = editorEl.scrollHeight;
+      const pages = Math.max(1, Math.ceil(scrollH / ch));
+      setTotalPages(pages);
     };
-    update();
 
-    const observer = new ResizeObserver(update);
+    let timer;
+    const debouncedUpdate = () => {
+      clearTimeout(timer);
+      timer = setTimeout(update, 80);
+    };
+
+    debouncedUpdate();
+    const observer = new ResizeObserver(debouncedUpdate);
     observer.observe(editorEl);
-    return () => observer.disconnect();
-  }, [measurePageHeightPx, content]);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [measurePageHeightPx, calcContentHeightPerPage, content]);
 
-  // Track cursor position → current page
+  // Track cursor position → current page + active page auto-switch
   const updateCurrentPage = useCallback(() => {
     const ed = quillRef.current?.getEditor();
-    if (!ed || !pageHeightRef.current) return;
+    if (!ed || !contentHeightRef.current) return;
     const sel = ed.getSelection();
     if (!sel) return;
     const bounds = ed.getBounds(sel.index);
-    setCurrentPage(Math.floor(bounds.top / pageHeightRef.current) + 1);
-  }, []);
+    const page0 = Math.floor(bounds.top / contentHeightRef.current); // 0-indexed
+    setCurrentPage(page0 + 1);
+    setActivePage((prev) => {
+      const clamped = Math.max(0, Math.min(page0, (totalPages || 1) - 1));
+      return clamped !== prev ? clamped : prev;
+    });
+  }, [totalPages]);
 
-  // Listen for selection/typing changes to update current page
   useEffect(() => {
     const ed = quillRef.current?.getEditor();
     if (!ed) return;
-    ed.on("selection-change", updateCurrentPage);
-    ed.on("text-change", updateCurrentPage);
+    ed.on('selection-change', updateCurrentPage);
+    ed.on('text-change', updateCurrentPage);
     return () => {
-      ed.off("selection-change", updateCurrentPage);
-      ed.off("text-change", updateCurrentPage);
+      ed.off('selection-change', updateCurrentPage);
+      ed.off('text-change', updateCurrentPage);
     };
   }, [updateCurrentPage]);
+
+  // Clamp activePage if totalPages shrinks
+  useEffect(() => {
+    setActivePage((prev) => Math.min(prev, Math.max(0, totalPages - 1)));
+  }, [totalPages]);
+
+  // Resolve header/footer text for a given page
+  const resolveHFForPage = useCallback((pageNum) => {
+    const isFirst = pageNum === 1;
+    const useDiff = headerFooter.differentFirstPage && isFirst;
+    let hL = useDiff ? '' : headerFooter.headerLeft;
+    let hC = useDiff ? (headerFooter.firstPageHeaderCenter || '') : headerFooter.headerCenter;
+    let hR = useDiff ? '' : headerFooter.headerRight;
+    let fL = useDiff ? '' : headerFooter.footerLeft;
+    let fC = useDiff ? (headerFooter.firstPageFooterCenter || '') : headerFooter.footerCenter;
+    let fR = useDiff ? '' : headerFooter.footerRight;
+    if (headerFooter.showPageNumbers) {
+      const pn = `Page ${pageNum}`;
+      switch (headerFooter.pageNumberPosition) {
+        case 'footer-center': fC = fC || pn; break;
+        case 'footer-right':  fR = fR || pn; break;
+        case 'header-right':  hR = hR || pn; break;
+        default:              fC = fC || pn;
+      }
+    }
+    return { hL, hC, hR, fL, fC, fR };
+  }, [headerFooter]);
+
+  // Switch to a page card and position cursor there
+  const switchToPage = useCallback((pageIndex) => {
+    setActivePage(pageIndex);
+    setCurrentPage(pageIndex + 1);
+    // After React re-render, focus Quill at the start of that page's content
+    setTimeout(() => {
+      const ed = quillRef.current?.getEditor();
+      if (!ed || !contentHeightRef.current) return;
+      const targetY = pageIndex * contentHeightRef.current + 10;
+      // Find the Quill index at approximately that Y position
+      const idx = ed.getSelection()?.index;
+      if (idx == null) {
+        // Try to set cursor to the area visible on this page
+        const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
+        ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
+      }
+      ed.focus();
+    }, 50);
+  }, []);
 
   /* ---------- SCROLL TO PAGE ---------- */
   const scrollToPage = useCallback((pageNum) => {
     const wrapEl = pageWrapRef.current;
     if (!wrapEl || !pageHeightRef.current) return;
-    const gapPerPage = 48;
-    const targetTop = (pageNum - 1) * (pageHeightRef.current + gapPerPage);
-    wrapEl.scrollTo({ top: targetTop, behavior: "smooth" });
+    const fullPageH = pageHeightRef.current;
+    const targetTop = (pageNum - 1) * (fullPageH + PAGE_GAP);
+    wrapEl.scrollTo({ top: targetTop, behavior: 'smooth' });
+    setCurrentPage(pageNum);
+    setActivePage(pageNum - 1);
   }, []);
 
   const navigate = useNavigate();
@@ -613,46 +715,66 @@ const shareDoc = async () => {
             overflow: visible !important;
           }
         }
-        .page-boundary-marker {
-          position: absolute;
-          left: -24px;
-          right: -24px;
-          height: 48px;
-          background: #e5e7eb;
+        /* ---- Page cards ---- */
+        .doc-page-card {
+          position: relative;
+          box-sizing: border-box;
+          border-radius: 4px;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .doc-page-card .ql-container {
+          border: none !important;
+          font-size: inherit;
+        }
+        .doc-page-card .ql-editor {
+          overflow: visible !important;
+          height: auto !important;
+          padding: 0 !important;
+        }
+        /* Viewport that clips content to exactly one page's worth */
+        .page-content-viewport {
+          overflow: hidden;
+          position: relative;
+          flex-shrink: 0;
+        }
+        /* Mirror (non-active) page content */
+        .page-mirror-content {
+          cursor: pointer;
+        }
+        .page-mirror-content .ql-editor {
+          padding: 0 !important;
+        }
+        /* Header/footer strips */
+        .page-hf-strip {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          font-size: 10px;
+          color: #64748b;
+          box-sizing: border-box;
+          flex-shrink: 0;
+          pointer-events: none;
+          user-select: none;
+        }
+        /* Gap between page cards */
+        .page-card-gap {
           display: flex;
           align-items: center;
           justify-content: center;
           pointer-events: none;
-          z-index: 10;
+          user-select: none;
         }
-        .page-boundary-marker::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 24px;
-          right: 24px;
-          height: 8px;
-          background: linear-gradient(to bottom, rgba(0,0,0,0.08), transparent);
-        }
-        .page-boundary-marker::after {
-          content: '';
-          position: absolute;
-          bottom: 0;
-          left: 24px;
-          right: 24px;
-          height: 8px;
-          background: linear-gradient(to top, rgba(0,0,0,0.08), transparent);
-        }
-        .page-boundary-marker span {
-          font-size: 9px;
-          color: #94a3b8;
-          font-weight: 600;
-          letter-spacing: 1px;
-          text-transform: uppercase;
-          background: #d1d5db;
-          padding: 2px 16px;
-          border-radius: 10px;
-          z-index: 1;
+        @media print {
+          .doc-page-card {
+            break-after: page;
+            page-break-after: always;
+            box-shadow: none !important;
+          }
+          .page-card-gap {
+            display: none;
+          }
         }
         .ql-table-embed {
           margin: 12px 0;
@@ -752,7 +874,13 @@ const shareDoc = async () => {
       {activeTab === "Home" && <HomeRibbon editor={editor} />}
 
       {/* INSERT TAB */}
-      {activeTab === "Insert" && <InsertRibbon editor={editor} />}
+      {activeTab === "Insert" && (
+        <InsertRibbon
+          editor={editor}
+          headerFooter={headerFooter}
+          setHeaderFooter={setHeaderFooter}
+        />
+      )}
 
       {/* LAYOUT TAB */}
       {activeTab === "Layout" && (
@@ -909,80 +1037,134 @@ const shareDoc = async () => {
             </div>
           )}
 
-          <div
-            style={(() => {
-              const pageH = viewSettings.viewMode === "web" ? null
-                : pageSettings.orientation === "landscape"
-                  ? pageSettings.width : pageSettings.height;
+          {/* ---- PAGINATED PAGE CARDS ---- */}
+          {(() => {
+            const pageW = viewSettings.viewMode === "web" ? "100%"
+              : pageSettings.orientation === "landscape"
+                ? pageSettings.height : pageSettings.width;
+            const pageH = measurePageHeightPx();
+            const marginPx = getMarginPx();
+            const hfEnabled = headerFooter.enabled && viewSettings.viewMode !== "web";
+            const hfZone = hfEnabled ? HF_ZONE_HEIGHT : 0;
+            const contentH = contentHeightRef.current || calcContentHeightPerPage();
 
-              // Build background layers: page-break line + optional gridlines
-              let bgImages = [];
-              let bgSizes = [];
-              if (pageH && viewSettings.viewMode !== "web") {
-                bgImages.push(
-                  `repeating-linear-gradient(to bottom, transparent 0, transparent calc(${pageH} - 1px), #cbd5e1 calc(${pageH} - 1px), #cbd5e1 ${pageH})`
-                );
-                bgSizes.push(`100% ${pageH}`);
-              }
-              if (viewSettings.gridlines) {
-                bgImages.push(
+            let gridBg = {};
+            if (viewSettings.gridlines) {
+              gridBg = {
+                backgroundImage: [
                   "linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px)",
-                  "linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px)"
-                );
-                bgSizes.push("20px 20px", "20px 20px");
-              }
-
-              return {
-                ...styles.editorWrap,
-                position: "relative",
-                width:
-                  viewSettings.viewMode === "web" ? "100%" :
-                  pageSettings.orientation === "landscape"
-                    ? pageSettings.height
-                    : pageSettings.width,
-                minHeight: pageH || "auto",
-                paddingBottom: totalPages > 1 ? `${(totalPages - 1) * 48}px` : 0,
-                backgroundColor: pageSettings.pageColor,
-                ...(bgImages.length
-                  ? { backgroundImage: bgImages.join(", "), backgroundSize: bgSizes.join(", ") }
-                  : {}),
-                border: pageSettings.pageBorder,
-                transform: `scale(${viewSettings.zoom / 100})`,
-                transformOrigin: "top center",
-                columnCount: pageSettings.columns,
-                columnGap: pageSettings.columns > 1 ? "24px" : "0",
-                ...(viewSettings.viewMode === "focus"
-                  ? { maxWidth: 700, boxShadow: "none", border: "none" }
-                  : {}),
+                  "linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px)",
+                ].join(", "),
+                backgroundSize: "20px 20px",
               };
-            })()}
-          >
-            <ReactQuill
-              ref={quillRef}
-              value={content}
-              onChange={setContent}
-              modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
-              style={{
-                background: "transparent",
-                padding: pageSettings.margin,
-                minHeight: "100%",
-              }}
-            />
-            {/* Page boundary markers with visual gap */}
-            {viewSettings.viewMode !== "web" && totalPages > 1 && (() => {
-              const pageH = pageSettings.orientation === "landscape"
-                ? pageSettings.width : pageSettings.height;
-              return Array.from({ length: totalPages - 1 }, (_, i) => (
-                <div
-                  key={i}
-                  className="page-boundary-marker"
-                  style={{ top: `calc(${(i + 1)} * ${pageH} + ${i * 48}px)` }}
-                >
-                  <span>Page {i + 2}</span>
-                </div>
-              ));
-            })()}
-          </div>
+            }
+
+            return (
+              <div style={{ transform: `scale(${viewSettings.zoom / 100})`, transformOrigin: "top center" }}>
+                {Array.from({ length: totalPages }, (_, i) => {
+                  const pageNum = i + 1;
+                  const isActive = i === activePage;
+                  const contentOffset = i * contentH;
+                  const hf = hfEnabled ? resolveHFForPage(pageNum) : null;
+                  const hasHeader = hf && (hf.hL || hf.hC || hf.hR);
+                  const hasFooter = hf && (hf.fL || hf.fC || hf.fR);
+
+                  return (
+                    <React.Fragment key={`page-${pageNum}`}>
+                      {/* Gap between pages */}
+                      {i > 0 && (
+                        <div className="page-card-gap" style={{
+                          height: PAGE_GAP,
+                          background: viewSettings.darkMode ? '#1e293b' : '#e5e7eb',
+                        }}>
+                          <span style={{
+                            fontSize: 9, color: '#94a3b8', fontWeight: 600,
+                            letterSpacing: 1, textTransform: 'uppercase',
+                            background: '#d1d5db', padding: '2px 16px', borderRadius: 10,
+                          }}>Page {pageNum}</span>
+                        </div>
+                      )}
+                      {/* Page card */}
+                      <div
+                        className="doc-page-card"
+                        style={{
+                          width: pageW,
+                          height: viewSettings.viewMode === "web" ? 'auto' : pageH,
+                          backgroundColor: pageSettings.pageColor,
+                          border: pageSettings.pageBorder,
+                          boxShadow: viewSettings.viewMode === "focus" ? "none" : "0 2px 16px rgba(0,0,0,0.08)",
+                          ...gridBg,
+                          ...(viewSettings.viewMode === "focus" ? { maxWidth: 700, border: "none" } : {}),
+                        }}
+                      >
+                        {/* Top margin */}
+                        <div style={{ height: marginPx, flexShrink: 0 }} />
+
+                        {/* Header strip */}
+                        {hasHeader && (
+                          <div className="page-hf-strip" style={{
+                            height: hfZone, padding: `0 ${marginPx}px`,
+                            borderBottom: '1px solid #e2e8f0',
+                          }}>
+                            <span>{hf.hL}</span><span>{hf.hC}</span><span>{hf.hR}</span>
+                          </div>
+                        )}
+
+                        {/* Content viewport — clips content to this page's slice */}
+                        <div
+                          className="page-content-viewport"
+                          style={{
+                            height: contentH,
+                            padding: `0 ${marginPx}px`,
+                          }}
+                          onClick={() => { if (!isActive) switchToPage(i); }}
+                        >
+                          {isActive ? (
+                            /* Active page: real Quill editor, offset to show this page's slice */
+                            <div style={{ marginTop: -contentOffset }}>
+                              <ReactQuill
+                                ref={quillRef}
+                                value={content}
+                                onChange={setContent}
+                                modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
+                                style={{ background: 'transparent' }}
+                              />
+                            </div>
+                          ) : (
+                            /* Non-active page: read-only mirror, offset to show this page's slice */
+                            <div
+                              className="page-mirror-content"
+                              style={{ marginTop: -contentOffset }}
+                            >
+                              <div className="ql-snow" style={{ background: 'transparent' }}>
+                                <div
+                                  className="ql-editor"
+                                  dangerouslySetInnerHTML={{ __html: content }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Footer strip */}
+                        {hasFooter && (
+                          <div className="page-hf-strip" style={{
+                            height: hfZone, padding: `0 ${marginPx}px`,
+                            borderTop: '1px solid #e2e8f0',
+                          }}>
+                            <span>{hf.fL}</span><span>{hf.fC}</span><span>{hf.fR}</span>
+                          </div>
+                        )}
+
+                        {/* Bottom margin */}
+                        <div style={{ height: marginPx, flexShrink: 0 }} />
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Page status bar */}
           <div style={styles.pageStatusBar}>
@@ -1158,7 +1340,6 @@ const styles = {
     background: "#fff",
     boxShadow: "0 2px 16px rgba(0,0,0,0.08)",
     borderRadius: 4,
-    transition: "all 0.3s ease",
     overflow: "hidden",
   },
   ruler: {

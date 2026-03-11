@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 
-export default function InsertRibbon({ editor }) {
+export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) {
   const [showSymbols, setShowSymbols] = useState(false);
   const [showShapes, setShowShapes] = useState(false);
+  const [showHeaderFooter, setShowHeaderFooter] = useState(false);
 
   if (!editor) return null;
 
@@ -210,7 +211,18 @@ export default function InsertRibbon({ editor }) {
         {
           label: "Shapes",
           icon: "⬡",
-          fn: () => { setShowShapes(!showShapes); setShowSymbols(false); },
+          fn: () => { setShowShapes(!showShapes); setShowSymbols(false); setShowHeaderFooter(false); },
+          dropdown: true,
+        },
+      ],
+    },
+    {
+      title: "Header & Footer",
+      items: [
+        {
+          label: "Header & Footer",
+          icon: "📝",
+          fn: () => { setShowHeaderFooter(!showHeaderFooter); setShowSymbols(false); setShowShapes(false); },
           dropdown: true,
         },
       ],
@@ -239,7 +251,7 @@ export default function InsertRibbon({ editor }) {
         {
           label: "Symbol",
           icon: "Ω",
-          fn: () => { setShowSymbols(!showSymbols); setShowShapes(false); },
+          fn: () => { setShowSymbols(!showSymbols); setShowShapes(false); setShowHeaderFooter(false); },
           dropdown: true,
         },
       ],
@@ -304,6 +316,160 @@ export default function InsertRibbon({ editor }) {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Header & Footer Panel */}
+      {showHeaderFooter && headerFooter && (
+        <div style={{ ...styles.dropdown, left: 320, minWidth: 420, padding: 16 }}>
+          <div style={styles.dropTitle}>Header & Footer Settings</div>
+
+          {/* Enable toggle */}
+          <label style={hfStyles.row}>
+            <input
+              type="checkbox"
+              checked={headerFooter.enabled}
+              onChange={(e) => setHeaderFooter(prev => ({ ...prev, enabled: e.target.checked }))}
+            />
+            <span style={hfStyles.label}>Enable Header & Footer</span>
+          </label>
+
+          {headerFooter.enabled && (
+            <>
+              {/* Header fields */}
+              <div style={hfStyles.sectionTitle}>Header</div>
+              <div style={hfStyles.fieldRow}>
+                <div style={hfStyles.field}>
+                  <label style={hfStyles.fieldLabel}>Left</label>
+                  <input
+                    style={hfStyles.input}
+                    value={headerFooter.headerLeft}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, headerLeft: e.target.value }))}
+                    placeholder="e.g. Company Name"
+                  />
+                </div>
+                <div style={hfStyles.field}>
+                  <label style={hfStyles.fieldLabel}>Center</label>
+                  <input
+                    style={hfStyles.input}
+                    value={headerFooter.headerCenter}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, headerCenter: e.target.value }))}
+                    placeholder="e.g. Document Title"
+                  />
+                </div>
+                <div style={hfStyles.field}>
+                  <label style={hfStyles.fieldLabel}>Right</label>
+                  <input
+                    style={hfStyles.input}
+                    value={headerFooter.headerRight}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, headerRight: e.target.value }))}
+                    placeholder="e.g. Date"
+                  />
+                </div>
+              </div>
+
+              {/* Footer fields */}
+              <div style={hfStyles.sectionTitle}>Footer</div>
+              <div style={hfStyles.fieldRow}>
+                <div style={hfStyles.field}>
+                  <label style={hfStyles.fieldLabel}>Left</label>
+                  <input
+                    style={hfStyles.input}
+                    value={headerFooter.footerLeft}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, footerLeft: e.target.value }))}
+                    placeholder="e.g. Author"
+                  />
+                </div>
+                <div style={hfStyles.field}>
+                  <label style={hfStyles.fieldLabel}>Center</label>
+                  <input
+                    style={hfStyles.input}
+                    value={headerFooter.footerCenter}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, footerCenter: e.target.value }))}
+                    placeholder="e.g. Confidential"
+                  />
+                </div>
+                <div style={hfStyles.field}>
+                  <label style={hfStyles.fieldLabel}>Right</label>
+                  <input
+                    style={hfStyles.input}
+                    value={headerFooter.footerRight}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, footerRight: e.target.value }))}
+                    placeholder="e.g. Version"
+                  />
+                </div>
+              </div>
+
+              {/* Page numbers */}
+              <div style={hfStyles.divider} />
+              <label style={hfStyles.row}>
+                <input
+                  type="checkbox"
+                  checked={headerFooter.showPageNumbers}
+                  onChange={(e) => setHeaderFooter(prev => ({ ...prev, showPageNumbers: e.target.checked }))}
+                />
+                <span style={hfStyles.label}>Show Page Numbers</span>
+              </label>
+
+              {headerFooter.showPageNumbers && (
+                <div style={{ marginLeft: 20, marginBottom: 8 }}>
+                  <label style={hfStyles.fieldLabel}>Position</label>
+                  <select
+                    style={hfStyles.select}
+                    value={headerFooter.pageNumberPosition}
+                    onChange={(e) => setHeaderFooter(prev => ({ ...prev, pageNumberPosition: e.target.value }))}
+                  >
+                    <option value="footer-center">Footer – Center</option>
+                    <option value="footer-right">Footer – Right</option>
+                    <option value="header-right">Header – Right</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Different first page */}
+              <label style={hfStyles.row}>
+                <input
+                  type="checkbox"
+                  checked={headerFooter.differentFirstPage}
+                  onChange={(e) => setHeaderFooter(prev => ({ ...prev, differentFirstPage: e.target.checked }))}
+                />
+                <span style={hfStyles.label}>Different First Page</span>
+              </label>
+
+              {headerFooter.differentFirstPage && (
+                <div style={hfStyles.fieldRow}>
+                  <div style={hfStyles.field}>
+                    <label style={hfStyles.fieldLabel}>First Page Header (center)</label>
+                    <input
+                      style={hfStyles.input}
+                      value={headerFooter.firstPageHeaderCenter}
+                      onChange={(e) => setHeaderFooter(prev => ({ ...prev, firstPageHeaderCenter: e.target.value }))}
+                      placeholder="Leave blank to hide"
+                    />
+                  </div>
+                  <div style={hfStyles.field}>
+                    <label style={hfStyles.fieldLabel}>First Page Footer (center)</label>
+                    <input
+                      style={hfStyles.input}
+                      value={headerFooter.firstPageFooterCenter}
+                      onChange={(e) => setHeaderFooter(prev => ({ ...prev, firstPageFooterCenter: e.target.value }))}
+                      placeholder="Leave blank to hide"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Close button */}
+              <div style={{ textAlign: "right", marginTop: 8 }}>
+                <button
+                  style={{ ...styles.btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+                  onClick={() => setShowHeaderFooter(false)}
+                >
+                  Done
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -430,5 +596,75 @@ const styles = {
     fontSize: 10,
     color: "#64748b",
     fontWeight: 500,
+  },
+};
+
+/* ================= HEADER & FOOTER STYLES ================= */
+
+const hfStyles = {
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+    cursor: "pointer",
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: "#334155",
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#475569",
+    marginTop: 10,
+    marginBottom: 6,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  fieldRow: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 8,
+  },
+  field: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+  },
+  fieldLabel: {
+    fontSize: 10,
+    fontWeight: 600,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  },
+  input: {
+    padding: "6px 8px",
+    border: "1px solid #e2e8f0",
+    borderRadius: 6,
+    fontSize: 12,
+    color: "#334155",
+    background: "#fff",
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  select: {
+    padding: "6px 8px",
+    border: "1px solid #e2e8f0",
+    borderRadius: 6,
+    fontSize: 12,
+    color: "#334155",
+    background: "#fff",
+    cursor: "pointer",
+    marginTop: 4,
+  },
+  divider: {
+    height: 1,
+    background: "#e2e8f0",
+    margin: "10px 0",
   },
 };
