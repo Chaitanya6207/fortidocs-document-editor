@@ -104,12 +104,13 @@ export default function Viewer() {
     if (!fileId || !canEdit) return;
     try {
       setSaving(true);
-      setStatus("Saving edits…");
+      setStatus("Creating new version…");
       const res = await api.post(`/api/doc/edit/${fileId}`, { content: currentContent.current });
       setDisplayCid(res.data.cid || displayCid);
       setHtml(currentContent.current);
       setDirty(false);
-      setStatus("✅ Edits saved successfully!");
+      const ver = res.data.version ? ` (v${res.data.version})` : "";
+      setStatus(`✅ New version created${ver}!`);
       setTimeout(() => setStatus(""), 3000);
     } catch (err) {
       console.error("Save edit error:", err);

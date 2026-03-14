@@ -18,6 +18,7 @@ const activityLogSchema = new mongoose.Schema({
       "DOWNLOADED",
       "DELETED",
       "EDITED",
+      "VERSIONED",
     ],
   },
   details: { type: String, default: "" },

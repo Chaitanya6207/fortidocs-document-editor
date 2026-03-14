@@ -215,6 +215,8 @@ export default function Editor() {
   const [sharedFileLoading, setSharedFileLoading] = useState(false);
   const sharedEditRef = useRef(false);
   const sharedFileIdRef = useRef(sharedFileId);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [versionHistory, setVersionHistory] = useState(null);
 
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
@@ -418,7 +420,7 @@ export default function Editor() {
     api.get(`/api/doc/view/${sharedFileId}`)
       .then((res) => {
         if (cancelled) return;
-        const { html, filename, permission } = res.data;
+        const { html, filename, permission, currentVersion } = res.data;
         if (permission !== "EDIT") {
           setStatus("You only have VIEW permission for this file");
           setSharedFileLoading(false);
@@ -429,7 +431,7 @@ export default function Editor() {
         setIsSharedEdit(true);
         sharedEditRef.current = true;
         sharedFileIdRef.current = sharedFileId;
-        setStatus(`Editing shared file: "${filename || sharedFilename}"`);
+        setStatus(`Editing shared file: "${filename || sharedFilename}" (v${currentVersion || 1})`);
         setTimeout(() => setStatus(""), 3000);
       })
       .catch((err) => {
@@ -497,14 +499,15 @@ export default function Editor() {
       return;
     }
 
-    // --- SHARED FILE EDIT SAVE ---
+    // --- SHARED FILE EDIT SAVE (creates new version) ---
     const isShared = sharedEditRef.current;
     const fileId = sharedFileIdRef.current;
     if (isShared && fileId) {
       try {
-        showStatus("Saving edits to shared document…");
+        showStatus("Creating new version of shared document…");
         const res = await api.post(`/api/doc/edit/${fileId}`, { content });
-        showStatus(`✅ Edits saved! CID: ${res.data.cid?.substring(0, 12)}…`);
+        const { version, cid, accessList } = res.data;
+        showStatus(`✅ Version ${version} created! CID: ${cid?.substring(0, 12)}… | Access: ${(accessList || []).join(", ")}`);
       } catch (err) {
         console.error("Shared edit save error:", err);
         showStatus(err.response?.data?.error || "Failed to save edits");
@@ -550,6 +553,26 @@ export default function Editor() {
       showStatus(err.response?.data?.error || "Cloud save failed");
     }
   };
+
+  const loadVersionHistory = async () => {
+    const fileId = sharedFileIdRef.current;
+    if (!fileId) return;
+    try {
+      const res = await api.get(`/api/doc/versions/${fileId}`);
+      setVersionHistory(res.data);
+      setShowVersionHistory(true);
+    } catch (err) {
+      console.error("Failed to load version history:", err);
+      showStatus("Failed to load version history");
+    }
+  };
+
+  // Auto-load version history when modal is opened
+  useEffect(() => {
+    if (showVersionHistory && sharedFileIdRef.current) {
+      loadVersionHistory();
+    }
+  }, [showVersionHistory]);
 
   const saveLocalDoc = () => {
     if (!content || content === "<p><br></p>") {
@@ -857,6 +880,15 @@ const shareDoc = async () => {
               style={{ fontWeight: 600 }}
             >
               💾 Save to Cloud
+            </button>
+          )}
+          {isSharedEdit && sharedFileId && (
+            <button
+              onClick={() => setShowVersionHistory(true)}
+              className="btn btn-ghost btn-sm"
+              style={{ fontWeight: 600 }}
+            >
+              📜 Version History
             </button>
           )}
           <span style={styles.userBadge}>👤 {user?.name || user?.email || "User"}</span>
@@ -1209,6 +1241,70 @@ const shareDoc = async () => {
           </div>
         </div>
       )}
+
+      {/* VERSION HISTORY MODAL */}
+      {showVersionHistory && (
+        <div style={versionModalStyles.overlay} onClick={() => setShowVersionHistory(false)}>
+          <div style={versionModalStyles.modal} onClick={e => e.stopPropagation()}>
+            <div style={versionModalStyles.header}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📜 Version History</h3>
+              <button onClick={() => setShowVersionHistory(false)} style={versionModalStyles.closeBtn}>✕</button>
+            </div>
+            {versionHistory ? (
+              <div style={versionModalStyles.body}>
+                <div style={{ marginBottom: 12, fontSize: 13, color: "#94a3b8" }}>
+                  <strong>{versionHistory.filename}</strong> — {versionHistory.versions?.length || 0} version(s)
+                  <br />
+                  Access List: {(versionHistory.accessList || []).join(", ") || "—"}
+                </div>
+                <div style={versionModalStyles.versionList}>
+                  {(versionHistory.versions || []).map(v => (
+                    <div key={v.version} style={versionModalStyles.versionCard}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontWeight: 700, color: "#60a5fa" }}>
+                          Version {v.version}
+                          {v.version === versionHistory.currentVersion && (
+                            <span style={{ color: "#4ade80", marginLeft: 8, fontSize: 11 }}>(current)</span>
+                          )}
+                        </span>
+                        <span style={{ fontSize: 11, color: "#64748b" }}>
+                          {v.createdAt ? new Date(v.createdAt).toLocaleString() : ""}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 4 }}>
+                        Editor: {v.editor?.name || v.editor?.email || "Unknown"}
+                        {v.editor?.wallet && <span style={{ color: "#94a3b8" }}> ({v.editor.wallet.substring(0, 8)}…)</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                        CID: {v.cid?.substring(0, 20)}…
+                        {v.previousCid && <span> | Prev: {v.previousCid.substring(0, 12)}…</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                        {v.encrypted && <span style={{ color: "#fbbf24" }}>🔒 Encrypted</span>}
+                        {v.blockchainTxHash && (
+                          <span style={{ color: "#4ade80", marginLeft: 8 }}>
+                            ⛓ On-chain: {v.blockchainTxHash.substring(0, 12)}…
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                        Authorized: {(v.authorizedUsers || []).join(", ")}
+                      </div>
+                      {v.fileHash && (
+                        <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>
+                          Hash: {v.fileHash.substring(0, 24)}…
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: 20, textAlign: "center", color: "#94a3b8" }}>Loading…</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1419,5 +1515,58 @@ const styles = {
   statusMsg: {
     color: "#2563eb",
     fontWeight: 600,
+  },
+};
+
+const versionModalStyles = {
+  overlay: {
+    position: "fixed",
+    top: 0, left: 0, right: 0, bottom: 0,
+    background: "rgba(0,0,0,0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10000,
+  },
+  modal: {
+    background: "#1e293b",
+    borderRadius: 12,
+    width: 520,
+    maxHeight: "80vh",
+    display: "flex",
+    flexDirection: "column",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+    border: "1px solid #334155",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "14px 20px",
+    borderBottom: "1px solid #334155",
+    color: "#f1f5f9",
+  },
+  closeBtn: {
+    background: "none",
+    border: "none",
+    color: "#94a3b8",
+    fontSize: 18,
+    cursor: "pointer",
+  },
+  body: {
+    padding: "16px 20px",
+    overflowY: "auto",
+    flex: 1,
+  },
+  versionList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  versionCard: {
+    background: "#0f172a",
+    borderRadius: 8,
+    padding: "12px 14px",
+    border: "1px solid #334155",
   },
 };

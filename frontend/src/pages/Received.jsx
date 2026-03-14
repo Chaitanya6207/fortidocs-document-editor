@@ -52,6 +52,7 @@ export default function Received() {
               <tr>
                 <th>File</th>
                 <th>Sender</th>
+                <th>Version</th>
                 <th>Received</th>
                 <th>Permission</th>
                 <th style={{ textAlign: "right" }}>Action</th>
@@ -73,6 +74,11 @@ export default function Received() {
                       {filename}
                     </td>
                     <td>{senderName}</td>
+                    <td>
+                      <span style={{ color: "#60a5fa", fontWeight: 600, fontSize: 12 }}>
+                        v{file?.currentVersion || 1}
+                      </span>
+                    </td>
                     <td>
                       {item.createdAt
                         ? new Date(item.createdAt).toLocaleString()

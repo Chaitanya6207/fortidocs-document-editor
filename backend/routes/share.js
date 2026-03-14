@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const FileAccess = require("../models/FileAccess");
 const File = require("../models/File");
+const DocumentVersion = require("../models/DocumentVersion");
 const ActivityLog = require("../models/ActivityLog");
 const { serverEncrypt } = require("../services/serverCrypto");
 
@@ -26,6 +27,7 @@ router.post("/", auth, async (req, res) => {
     }
 
     const perm = (permission === "EDIT") ? "EDIT" : "VIEW";
+    const normalizedEmail = recipientEmail.trim().toLowerCase();
 
     const file = await File.findById(fileId);
     if (!file) {
@@ -44,11 +46,40 @@ router.post("/", auth, async (req, res) => {
     const access = await FileAccess.create({
       fileId: file._id,
       ownerId: req.user.id,
-      recipientEmail: recipientEmail.trim().toLowerCase(),
+      recipientEmail: normalizedEmail,
       permission: perm,
       encryptedKey: encryptedKey || "",
       serverEncryptedKey: srvKey,
     });
+
+    // === UPDATE ACCESS CONTROL LIST ===
+    if (!file.accessList) file.accessList = [];
+    if (!file.accessList.includes(normalizedEmail)) {
+      file.accessList.push(normalizedEmail);
+      await file.save();
+    }
+
+    // Add the recipient's key to the latest version's encryptedKeys
+    if (srvKey) {
+      const User = require("../models/User");
+      const recipientUser = await User.findOne({ email: normalizedEmail });
+      if (recipientUser) {
+        const latestVersion = await DocumentVersion.findOne({ fileId: file._id }).sort({ version: -1 });
+        if (latestVersion) {
+          const alreadyHasKey = latestVersion.encryptedKeys.some(
+            k => k.email === normalizedEmail
+          );
+          if (!alreadyHasKey) {
+            latestVersion.encryptedKeys.push({
+              userId: recipientUser._id,
+              email: normalizedEmail,
+              serverEncryptedKey: srvKey,
+            });
+            await latestVersion.save();
+          }
+        }
+      }
+    }
 
     console.log("✅ FileAccess created:", access);
 
@@ -57,7 +88,7 @@ router.post("/", auth, async (req, res) => {
       fileId: file._id,
       userId: req.user.id,
       action: "SHARED",
-      details: `Shared with ${recipientEmail.trim().toLowerCase()} [${perm}]${encryptedKey ? " [encrypted]" : ""}`,
+      details: `Shared with ${normalizedEmail} [${perm}]${encryptedKey ? " [encrypted]" : ""} | ACL: ${file.accessList.join(", ")}`,
     });
 
     res.json(access);

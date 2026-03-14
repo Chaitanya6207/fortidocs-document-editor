@@ -1,12 +1,75 @@
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 const axios = require("axios");
+const CryptoJS = require("crypto-js");
 const auth = require("../middleware/auth");
 const File = require("../models/File");
 const FileAccess = require("../models/FileAccess");
+const DocumentVersion = require("../models/DocumentVersion");
 const ActivityLog = require("../models/ActivityLog");
+const User = require("../models/User");
 const { pinJSONToIPFS } = require("../services/pinata");
 const { serverEncrypt, serverDecrypt } = require("../services/serverCrypto");
+const { logVersionOnChain } = require("../services/chain");
+
+/**
+ * Helper: generate a new random AES-256 key (hex).
+ */
+function generateAESKey() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+/**
+ * Helper: compute SHA-256 hash of content for blockchain audit.
+ */
+function hashContent(content) {
+  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+/**
+ * Helper: build encryptedKeys array for all users in the ACL.
+ * Encrypts the given AES key server-side for each user.
+ */
+async function buildEncryptedKeysForACL(file, newAesKey) {
+  const ownerEmail = await User.findById(file.ownerId).then(u => (u?.email || "").trim().toLowerCase());
+  const emails = new Set();
+  if (ownerEmail) emails.add(ownerEmail);
+  (file.accessList || []).forEach(e => emails.add(e.trim().toLowerCase()));
+
+  const encryptedKeys = [];
+  for (const email of emails) {
+    const user = await User.findOne({ email });
+    if (!user) continue;
+    const srvKey = serverEncrypt(newAesKey);
+    encryptedKeys.push({
+      userId: user._id,
+      email,
+      serverEncryptedKey: srvKey,
+    });
+  }
+  return encryptedKeys;
+}
+
+/**
+ * Helper: fetch content from IPFS, trying multiple gateways.
+ */
+async function fetchFromIPFS(cid) {
+  const gateways = [
+    `https://gateway.pinata.cloud/ipfs/${cid}`,
+    `https://ipfs.io/ipfs/${cid}`,
+    `https://cloudflare-ipfs.com/ipfs/${cid}`,
+  ];
+  for (const url of gateways) {
+    try {
+      const resp = await axios.get(url, { timeout: 15000 });
+      return resp.data;
+    } catch (err) {
+      console.warn(`Gateway failed (${url}):`, err.message);
+    }
+  }
+  return null;
+}
 
 /**
  * GET /api/doc/ipfs/:cid
@@ -65,7 +128,7 @@ router.post("/save", auth, async (req, res) => {
       });
     }
 
-    // --- CLOUD SAVE ---
+    // --- CLOUD SAVE (Version 1) ---
     const isEncrypted = !!(encryptedKey || aesKey);
 
     const ipfsPayload = isEncrypted
@@ -88,20 +151,62 @@ router.post("/save", auth, async (req, res) => {
       srvKey = serverEncrypt(aesKey);
     }
 
+    // Get owner info
+    const owner = await User.findById(req.user.id);
+    const ownerEmail = (owner?.email || "").trim().toLowerCase();
+
     const file = await File.create({
       filename: `${docName}.html`,
       cid,
       ownerId: req.user.id,
+      ownerWallet: owner?.walletAddress || "",
       encrypted: isEncrypted,
       encryptedKey: encryptedKey || "",
       serverEncryptedKey: srvKey,
+      currentVersion: 1,
+      accessList: [ownerEmail],
     });
+
+    // Create Version 1 record
+    const fileHash = hashContent(content);
+    const encryptedKeys = [];
+    if (aesKey && owner) {
+      encryptedKeys.push({
+        userId: owner._id,
+        email: ownerEmail,
+        serverEncryptedKey: srvKey,
+      });
+    }
+
+    const version = await DocumentVersion.create({
+      fileId: file._id,
+      version: 1,
+      cid,
+      previousCid: "",
+      editorId: req.user.id,
+      editorWallet: owner?.walletAddress || "",
+      encrypted: isEncrypted,
+      encryptedKeys,
+      fileHash,
+    });
+
+    // Log blockchain version (non-blocking)
+    logVersionOnChain(
+      process.env.OWNER_PRIVATE_KEY,
+      process.env.CONTRACT_ADDRESS,
+      process.env.RPC_URL,
+      { fileHash, previousCid: "", editorWallet: owner?.walletAddress || "", version: 1, cid }
+    ).then(receipt => {
+      if (receipt) {
+        DocumentVersion.findByIdAndUpdate(version._id, { blockchainTxHash: receipt.transactionHash }).catch(() => {});
+      }
+    }).catch(() => {});
 
     await ActivityLog.create({
       fileId: file._id,
       userId: req.user.id,
       action: "SAVED_CLOUD",
-      details: `Saved "${docName}" to IPFS (CID: ${cid})${isEncrypted ? " [encrypted]" : ""}`,
+      details: `Saved "${docName}" v1 to IPFS (CID: ${cid})${isEncrypted ? " [encrypted]" : ""}`,
     });
 
     res.json(file);
@@ -134,7 +239,6 @@ router.get("/view/:fileId", auth, async (req, res) => {
     if (isOwner) {
       serverKey = file.serverEncryptedKey;
     } else {
-      // Check if the user has access via FileAccess
       const access = await FileAccess.findOne({
         fileId: file._id,
         recipientEmail: userEmail,
@@ -146,35 +250,30 @@ router.get("/view/:fileId", auth, async (req, res) => {
       permission = access.permission || "VIEW";
     }
 
+    // Try to get the key from the latest version's encryptedKeys for this user
+    const latestVersion = await DocumentVersion.findOne({ fileId: file._id }).sort({ version: -1 });
+    if (latestVersion) {
+      const userKey = latestVersion.encryptedKeys.find(
+        k => k.userId.toString() === userId || k.email === userEmail
+      );
+      if (userKey) {
+        serverKey = userKey.serverEncryptedKey;
+      }
+    }
+
     // Log that the user opened/viewed this file
     await ActivityLog.create({
       fileId: file._id,
       userId: req.user.id,
       action: "OPENED",
       details: isOwner
-        ? `Owner opened "${file.filename}"`
-        : `${userEmail} opened shared file "${file.filename}"`,
+        ? `Owner opened "${file.filename}" (v${file.currentVersion || 1})`
+        : `${userEmail} opened shared file "${file.filename}" (v${file.currentVersion || 1})`,
       ipAddress: req.ip || "",
     });
 
-    // 3. Fetch content from IPFS
-    const gateways = [
-      `https://gateway.pinata.cloud/ipfs/${file.cid}`,
-      `https://ipfs.io/ipfs/${file.cid}`,
-      `https://cloudflare-ipfs.com/ipfs/${file.cid}`,
-    ];
-
-    let ipfsData = null;
-    for (const url of gateways) {
-      try {
-        const resp = await axios.get(url, { timeout: 15000 });
-        ipfsData = resp.data;
-        break;
-      } catch (err) {
-        console.warn(`Gateway failed (${url}):`, err.message);
-      }
-    }
-
+    // 3. Fetch content from IPFS (latest CID)
+    const ipfsData = await fetchFromIPFS(file.cid);
     if (!ipfsData) {
       return res.status(502).json({ error: "Failed to fetch from IPFS" });
     }
@@ -188,11 +287,7 @@ router.get("/view/:fileId", auth, async (req, res) => {
       }
 
       try {
-        // Decrypt the AES key server-side
         const rawAesKey = serverDecrypt(serverKey);
-
-        // Decrypt the content using the AES key (CryptoJS compatible)
-        const CryptoJS = require("crypto-js");
         const bytes = CryptoJS.AES.decrypt(ipfsData.encryptedContent, rawAesKey);
         const html = bytes.toString(CryptoJS.enc.Utf8);
 
@@ -200,7 +295,11 @@ router.get("/view/:fileId", auth, async (req, res) => {
           return res.status(500).json({ error: "Decryption produced empty result" });
         }
 
-        return res.json({ html, filename: file.filename, cid: file.cid, encrypted: true, permission });
+        return res.json({
+          html, filename: file.filename, cid: file.cid,
+          encrypted: true, permission,
+          currentVersion: file.currentVersion || 1,
+        });
       } catch (decErr) {
         console.error("Server decryption failed:", decErr.message);
         return res.status(500).json({ error: "Failed to decrypt document" });
@@ -209,7 +308,11 @@ router.get("/view/:fileId", auth, async (req, res) => {
 
     // 5. Unencrypted document
     const html = ipfsData.content || (typeof ipfsData === "string" ? ipfsData : JSON.stringify(ipfsData));
-    return res.json({ html, filename: file.filename, cid: file.cid, encrypted: false, permission });
+    return res.json({
+      html, filename: file.filename, cid: file.cid,
+      encrypted: false, permission,
+      currentVersion: file.currentVersion || 1,
+    });
 
   } catch (err) {
     console.error("VIEW ERROR:", err);
@@ -239,10 +342,7 @@ router.post("/edit/:fileId", auth, async (req, res) => {
     const isOwner = file.ownerId.toString() === userId;
 
     // Non-owners must have EDIT permission
-    let serverKey = "";
-    if (isOwner) {
-      serverKey = file.serverEncryptedKey;
-    } else {
+    if (!isOwner) {
       const access = await FileAccess.findOne({
         fileId: file._id,
         recipientEmail: userEmail,
@@ -253,16 +353,17 @@ router.post("/edit/:fileId", auth, async (req, res) => {
       if (access.permission !== "EDIT") {
         return res.status(403).json({ error: "You only have VIEW permission for this file" });
       }
-      serverKey = access.serverEncryptedKey;
     }
 
-    // Build IPFS payload
+    // === VERSION CHAIN: Generate NEW AES key for this version ===
+    const newAesKey = generateAESKey();
+    const previousCid = file.cid;
+    const newVersion = (file.currentVersion || 1) + 1;
+
+    // Encrypt content with the new AES key
     let ipfsPayload;
-    if (file.encrypted && serverKey) {
-      // Re-encrypt with the same AES key
-      const rawAesKey = serverDecrypt(serverKey);
-      const CryptoJS = require("crypto-js");
-      const encryptedContent = CryptoJS.AES.encrypt(content, rawAesKey).toString();
+    if (file.encrypted) {
+      const encryptedContent = CryptoJS.AES.encrypt(content, newAesKey).toString();
       ipfsPayload = {
         type: "encrypted-document",
         encryptedContent,
@@ -277,12 +378,62 @@ router.post("/edit/:fileId", auth, async (req, res) => {
     }
 
     const cid = await pinJSONToIPFS(ipfsPayload);
+    const fileHash = hashContent(content);
 
-    const oldCid = file.cid;
+    // Encrypt the new AES key for ALL users in the access list
+    const encryptedKeys = await buildEncryptedKeysForACL(file, newAesKey);
 
-    // Update file record with new CID (replaces old version)
+    // Also update the file's own serverEncryptedKey (for owner backward compat)
+    const ownerKeyEntry = encryptedKeys.find(k => k.userId.toString() === file.ownerId.toString());
+    const newOwnerSrvKey = ownerKeyEntry ? ownerKeyEntry.serverEncryptedKey : serverEncrypt(newAesKey);
+
+    // Update file record: new CID, new version, preserve old versions on blockchain
     file.cid = cid;
+    file.currentVersion = newVersion;
+    file.serverEncryptedKey = newOwnerSrvKey;
     await file.save();
+
+    // Update all FileAccess records with new encrypted keys for each recipient
+    for (const keyEntry of encryptedKeys) {
+      await FileAccess.updateMany(
+        { fileId: file._id, recipientEmail: keyEntry.email },
+        { $set: { serverEncryptedKey: keyEntry.serverEncryptedKey } }
+      );
+    }
+
+    // Get editor info
+    const editor = await User.findById(userId);
+
+    // Create new version record
+    const versionDoc = await DocumentVersion.create({
+      fileId: file._id,
+      version: newVersion,
+      cid,
+      previousCid,
+      editorId: userId,
+      editorWallet: editor?.walletAddress || "",
+      encrypted: file.encrypted,
+      encryptedKeys,
+      fileHash,
+    });
+
+    // Log blockchain version (non-blocking)
+    logVersionOnChain(
+      process.env.OWNER_PRIVATE_KEY,
+      process.env.CONTRACT_ADDRESS,
+      process.env.RPC_URL,
+      {
+        fileHash,
+        previousCid,
+        editorWallet: editor?.walletAddress || "",
+        version: newVersion,
+        cid,
+      }
+    ).then(receipt => {
+      if (receipt) {
+        DocumentVersion.findByIdAndUpdate(versionDoc._id, { blockchainTxHash: receipt.transactionHash }).catch(() => {});
+      }
+    }).catch(() => {});
 
     // Build detailed modification summary
     const contentLength = content.length;
@@ -290,27 +441,165 @@ router.post("/edit/:fileId", auth, async (req, res) => {
     const wordCount = plainText.trim().split(/\s+/).filter(Boolean).length;
     const editedBy = isOwner ? "Owner" : userEmail;
     const detailParts = [
-      `${editedBy} edited "${file.filename}"`,
+      `${editedBy} created v${newVersion} of "${file.filename}"`,
       `Words: ${wordCount}`,
       `Content size: ${(contentLength / 1024).toFixed(1)} KB`,
-      `Previous CID: ${oldCid ? oldCid.substring(0, 16) + "…" : "none"}`,
+      `Previous CID: ${previousCid ? previousCid.substring(0, 16) + "…" : "none"}`,
       `New CID: ${cid.substring(0, 16)}…`,
+      `ACL: ${file.accessList.join(", ")}`,
       `Timestamp: ${new Date().toISOString()}`,
     ];
 
-    // Log the edit with detailed info
     await ActivityLog.create({
       fileId: file._id,
       userId,
-      action: "EDITED",
+      action: "VERSIONED",
       details: detailParts.join(" | "),
       ipAddress: req.ip || "",
     });
 
-    res.json({ message: "Document saved successfully", cid, filename: file.filename });
+    res.json({
+      message: "New version created successfully",
+      cid,
+      filename: file.filename,
+      version: newVersion,
+      previousCid,
+      accessList: file.accessList,
+    });
   } catch (err) {
     console.error("EDIT ERROR:", err);
     res.status(500).json({ error: "Failed to save edits" });
+  }
+});
+
+/**
+ * GET /api/doc/versions/:fileId
+ * List all versions of a document (version chain).
+ */
+router.get("/versions/:fileId", auth, async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const userId = req.user.id;
+    const userEmail = (req.user.email || "").trim().toLowerCase();
+
+    const file = await File.findById(fileId);
+    if (!file) return res.status(404).json({ error: "File not found" });
+
+    // Check authorization
+    const isOwner = file.ownerId.toString() === userId;
+    if (!isOwner) {
+      const access = await FileAccess.findOne({ fileId: file._id, recipientEmail: userEmail });
+      if (!access) {
+        return res.status(403).json({ error: "You don't have access to this file" });
+      }
+    }
+
+    const versions = await DocumentVersion.find({ fileId: file._id })
+      .populate("editorId", "name email walletAddress")
+      .sort({ version: -1 });
+
+    res.json({
+      fileId: file._id,
+      filename: file.filename,
+      currentVersion: file.currentVersion || 1,
+      accessList: file.accessList || [],
+      versions: versions.map(v => ({
+        version: v.version,
+        cid: v.cid,
+        previousCid: v.previousCid,
+        editor: v.editorId ? { name: v.editorId.name, email: v.editorId.email, wallet: v.editorId.walletAddress } : null,
+        fileHash: v.fileHash,
+        blockchainTxHash: v.blockchainTxHash,
+        encrypted: v.encrypted,
+        authorizedUsers: v.encryptedKeys.map(k => k.email),
+        createdAt: v.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error("VERSIONS ERROR:", err);
+    res.status(500).json({ error: "Failed to load versions" });
+  }
+});
+
+/**
+ * GET /api/doc/version/:fileId/:version
+ * View a specific version of a document.
+ */
+router.get("/version/:fileId/:version", auth, async (req, res) => {
+  try {
+    const { fileId, version: versionNum } = req.params;
+    const userId = req.user.id;
+    const userEmail = (req.user.email || "").trim().toLowerCase();
+
+    const file = await File.findById(fileId);
+    if (!file) return res.status(404).json({ error: "File not found" });
+
+    // Check authorization
+    const isOwner = file.ownerId.toString() === userId;
+    if (!isOwner) {
+      const access = await FileAccess.findOne({ fileId: file._id, recipientEmail: userEmail });
+      if (!access) {
+        return res.status(403).json({ error: "You don't have access to this file" });
+      }
+    }
+
+    const versionDoc = await DocumentVersion.findOne({ fileId: file._id, version: parseInt(versionNum) })
+      .populate("editorId", "name email");
+    if (!versionDoc) return res.status(404).json({ error: "Version not found" });
+
+    // Fetch from IPFS
+    const ipfsData = await fetchFromIPFS(versionDoc.cid);
+    if (!ipfsData) {
+      return res.status(502).json({ error: "Failed to fetch version from IPFS" });
+    }
+
+    // Find the user's key in this version's encryptedKeys
+    let serverKey = "";
+    const userKey = versionDoc.encryptedKeys.find(
+      k => k.userId.toString() === userId || k.email === userEmail
+    );
+    if (userKey) {
+      serverKey = userKey.serverEncryptedKey;
+    } else if (isOwner && file.serverEncryptedKey) {
+      serverKey = file.serverEncryptedKey;
+    }
+
+    // Decrypt if encrypted
+    if (versionDoc.encrypted && ipfsData.type === "encrypted-document" && ipfsData.encryptedContent) {
+      if (!serverKey) {
+        return res.status(400).json({ error: "No decryption key available for this version" });
+      }
+      try {
+        const rawAesKey = serverDecrypt(serverKey);
+        const bytes = CryptoJS.AES.decrypt(ipfsData.encryptedContent, rawAesKey);
+        const html = bytes.toString(CryptoJS.enc.Utf8);
+        if (!html) return res.status(500).json({ error: "Decryption produced empty result" });
+
+        return res.json({
+          html, filename: file.filename, cid: versionDoc.cid,
+          version: versionDoc.version, encrypted: true,
+          editor: versionDoc.editorId ? { name: versionDoc.editorId.name, email: versionDoc.editorId.email } : null,
+          fileHash: versionDoc.fileHash,
+          createdAt: versionDoc.createdAt,
+        });
+      } catch (decErr) {
+        console.error("Version decryption failed:", decErr.message);
+        return res.status(500).json({ error: "Failed to decrypt version" });
+      }
+    }
+
+    // Unencrypted
+    const html = ipfsData.content || (typeof ipfsData === "string" ? ipfsData : JSON.stringify(ipfsData));
+    return res.json({
+      html, filename: file.filename, cid: versionDoc.cid,
+      version: versionDoc.version, encrypted: false,
+      editor: versionDoc.editorId ? { name: versionDoc.editorId.name, email: versionDoc.editorId.email } : null,
+      fileHash: versionDoc.fileHash,
+      createdAt: versionDoc.createdAt,
+    });
+  } catch (err) {
+    console.error("VERSION VIEW ERROR:", err);
+    res.status(500).json({ error: "Failed to load version" });
   }
 });
 

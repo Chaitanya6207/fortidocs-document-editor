@@ -11,6 +11,10 @@ const fileSchema = new mongoose.Schema({
   encrypted: { type: Boolean, default: false },
   encryptedKey: { type: String, default: "" },
   serverEncryptedKey: { type: String, default: "" },
+  // Version chain
+  currentVersion: { type: Number, default: 1 },
+  // Access Control List — emails of all users who have ever had access
+  accessList: [{ type: String }],
   createdAt: { type: Date, default: Date.now }
 });
 

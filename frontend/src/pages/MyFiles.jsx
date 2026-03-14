@@ -13,6 +13,7 @@ const ACTION_LABELS = {
   DOWNLOADED: { label: "Downloaded", color: "#ea580c", bg: "#fff7ed", icon: "⬇️" },
   DELETED: { label: "Deleted", color: "#dc2626", bg: "#fef2f2", icon: "🗑️" },
   EDITED: { label: "Edited", color: "#f59e0b", bg: "#fffbeb", icon: "✏️" },
+  VERSIONED: { label: "New Version", color: "#8b5cf6", bg: "#f5f3ff", icon: "📜" },
 };
 
 export default function MyFiles() {
@@ -152,6 +153,12 @@ export default function MyFiles() {
                   <div style={styles.fileName}>{file.filename}</div>
                   <div style={styles.fileMeta}>
                     <span>Created {formatDate(file.createdAt)}</span>
+                    {file.currentVersion > 1 && (
+                      <>
+                        <span style={styles.dot}>•</span>
+                        <span style={{ color: "#8b5cf6", fontWeight: 600 }}>v{file.currentVersion}</span>
+                      </>
+                    )}
                     {file.size && (
                       <>
                         <span style={styles.dot}>•</span>
