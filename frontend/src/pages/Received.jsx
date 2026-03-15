@@ -111,7 +111,8 @@ export default function Received() {
                 const encKey = item?.encryptedKey || "";
 
                 return (
-                  <tr key={item._id}>
+                  <React.Fragment key={item._id}>
+                  <tr>
                     <td style={styles.fileCell}>
                       <span style={styles.fileIcon}>📄</span>
                       {filename}
@@ -222,6 +223,7 @@ export default function Received() {
                       </td>
                     </tr>
                   )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
