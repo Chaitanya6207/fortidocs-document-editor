@@ -2,9 +2,23 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 
+const ACTION_LABELS = {
+  CREATED: { label: "Created", color: "#2563eb", bg: "#eff6ff", icon: "📄" },
+  SAVED_CLOUD: { label: "Saved to Cloud", color: "#7c3aed", bg: "#f5f3ff", icon: "☁️" },
+  SHARED: { label: "Shared", color: "#059669", bg: "#f0fdf4", icon: "🔗" },
+  OPENED: { label: "Opened", color: "#6366f1", bg: "#eef2ff", icon: "📂" },
+  VIEWED: { label: "Viewed", color: "#0ea5e9", bg: "#f0f9ff", icon: "👁" },
+  DELETED: { label: "Deleted", color: "#dc2626", bg: "#fef2f2", icon: "🗑️" },
+  EDITED: { label: "Edited", color: "#f59e0b", bg: "#fffbeb", icon: "✏️" },
+  VERSIONED: { label: "New Version", color: "#8b5cf6", bg: "#f5f3ff", icon: "📜" },
+};
+
 export default function Received() {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expandedFile, setExpandedFile] = useState(null);
+  const [logs, setLogs] = useState({});
+  const [logsLoading, setLogsLoading] = useState({});
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,6 +35,35 @@ export default function Received() {
       setLoading(false);
     }
   }
+
+  const toggleLogs = async (fileId) => {
+    if (expandedFile === fileId) {
+      setExpandedFile(null);
+      return;
+    }
+    setExpandedFile(fileId);
+    if (!logs[fileId]) {
+      setLogsLoading((p) => ({ ...p, [fileId]: true }));
+      try {
+        const res = await api.get(`/api/logs/file/${fileId}`);
+        setLogs((p) => ({ ...p, [fileId]: res.data }));
+      } catch (err) {
+        console.error("Failed to load logs:", err);
+        setLogs((p) => ({ ...p, [fileId]: [] }));
+      } finally {
+        setLogsLoading((p) => ({ ...p, [fileId]: false }));
+      }
+    }
+  };
+
+  const timeAgo = (d) => {
+    const secs = Math.floor((Date.now() - new Date(d)) / 1000);
+    if (secs < 60) return "just now";
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+    if (secs < 604800) return `${Math.floor(secs / 86400)}d ago`;
+    return new Date(d).toLocaleString();
+  };
 
   return (
     <div style={styles.page}>
@@ -114,6 +157,13 @@ export default function Received() {
                           )}
                           <button
                             className="btn btn-ghost btn-sm"
+                            onClick={() => toggleLogs(file._id)}
+                            style={expandedFile === file._id ? { background: "#eff6ff", borderColor: "#2563eb", color: "#2563eb" } : {}}
+                          >
+                            📋 {expandedFile === file._id ? "Hide" : "Logs"}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
                             onClick={() =>
                               navigator.clipboard.writeText(
                                 `https://gateway.pinata.cloud/ipfs/${cid}`
@@ -128,6 +178,50 @@ export default function Received() {
                       )}
                     </td>
                   </tr>
+                  {/* EXPANDABLE ACTIVITY LOGS */}
+                  {expandedFile === file?._id && (
+                    <tr>
+                      <td colSpan="6" style={{ padding: 0, background: "#fafbfc" }}>
+                        <div style={styles.logsPanel}>
+                          <div style={styles.logsPanelHeader}>
+                            <span style={styles.logsPanelTitle}>📋 Activity Log — {filename}</span>
+                            <span style={styles.logCount}>
+                              {logsLoading[file._id] ? "Loading..." : `${(logs[file._id] || []).length} entries`}
+                            </span>
+                          </div>
+                          {logsLoading[file._id] ? (
+                            <div style={{ padding: 20, textAlign: "center" }}><div className="spinner" style={{ width: 20, height: 20 }} /></div>
+                          ) : (logs[file._id] || []).length === 0 ? (
+                            <div style={{ padding: 20, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No activity logged yet</div>
+                          ) : (
+                            <div style={styles.timeline}>
+                              {(logs[file._id] || []).map((log, i) => {
+                                const a = ACTION_LABELS[log.action] || { label: log.action, color: "#64748b", bg: "#f8fafc", icon: "📌" };
+                                return (
+                                  <div key={log._id || i} style={styles.timelineItem}>
+                                    {i < (logs[file._id] || []).length - 1 && <div style={styles.timelineLine} />}
+                                    <div style={{ ...styles.timelineDot, background: a.color }} />
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: a.bg, color: a.color }}>
+                                          {a.icon} {a.label}
+                                        </span>
+                                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{timeAgo(log.createdAt)}</span>
+                                      </div>
+                                      {log.details && <div style={{ fontSize: 12, color: "#475569", marginTop: 3, lineHeight: 1.4 }}>{log.details}</div>}
+                                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2, fontStyle: "italic" }}>
+                                        by {log.userId?.name || log.userId?.email || "Unknown"}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 );
               })}
             </tbody>
@@ -186,5 +280,53 @@ const styles = {
     display: "flex",
     gap: 6,
     justifyContent: "flex-end",
+  },
+  logsPanel: {
+    borderTop: "1px solid #e2e8f0",
+  },
+  logsPanelHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "10px 18px",
+    borderBottom: "1px solid #f1f5f9",
+  },
+  logsPanelTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#334155",
+  },
+  logCount: {
+    fontSize: 11,
+    color: "#94a3b8",
+    fontWeight: 500,
+  },
+  timeline: {
+    padding: "12px 18px 16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+  },
+  timelineItem: {
+    display: "flex",
+    gap: 12,
+    position: "relative",
+    paddingBottom: 16,
+  },
+  timelineLine: {
+    position: "absolute",
+    left: 5,
+    top: 14,
+    bottom: 0,
+    width: 2,
+    background: "#e2e8f0",
+  },
+  timelineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: "50%",
+    flexShrink: 0,
+    marginTop: 3,
+    zIndex: 1,
   },
 };

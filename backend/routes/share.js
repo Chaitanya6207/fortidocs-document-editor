@@ -3,9 +3,10 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const FileAccess = require("../models/FileAccess");
 const File = require("../models/File");
+const User = require("../models/User");
 const DocumentVersion = require("../models/DocumentVersion");
 const ActivityLog = require("../models/ActivityLog");
-const { serverEncrypt } = require("../services/serverCrypto");
+const { serverEncrypt, serverDecrypt } = require("../services/serverCrypto");
 
 console.log("🔥 share.js loaded");
 
@@ -34,13 +35,40 @@ router.post("/", auth, async (req, res) => {
       return res.status(404).json({ error: "File not found" });
     }
 
+    // Authorization: allow owner OR any user in ACL with EDIT permission to share
+    const sharerEmail = (req.user.email || "").trim().toLowerCase();
+    const isOwner = file.ownerId.toString() === req.user.id;
+    if (!isOwner) {
+      const sharerAccess = await FileAccess.findOne({
+        fileId: file._id,
+        recipientEmail: sharerEmail,
+        permission: "EDIT",
+      });
+      if (!sharerAccess) {
+        return res.status(403).json({ error: "You don't have permission to share this file" });
+      }
+    }
+
     // Server-encrypt the AES key for the recipient
     let srvKey = "";
     if (aesKey) {
       srvKey = serverEncrypt(aesKey);
-    } else if (file.serverEncryptedKey) {
-      // Reuse the file's server-encrypted key for backward compat
-      srvKey = file.serverEncryptedKey;
+    } else {
+      // Derive the key: get the sharer's key from the latest version and re-encrypt for recipient
+      const latestVersion = await DocumentVersion.findOne({ fileId: file._id }).sort({ version: -1 });
+      if (latestVersion) {
+        const sharerKey = latestVersion.encryptedKeys.find(
+          k => k.userId.toString() === req.user.id || k.email === sharerEmail
+        );
+        if (sharerKey) {
+          // Decrypt the AES key and re-encrypt for the new recipient
+          const rawAesKey = serverDecrypt(sharerKey.serverEncryptedKey);
+          srvKey = serverEncrypt(rawAesKey);
+        }
+      }
+      if (!srvKey && file.serverEncryptedKey) {
+        srvKey = file.serverEncryptedKey;
+      }
     }
 
     const access = await FileAccess.create({
@@ -61,7 +89,6 @@ router.post("/", auth, async (req, res) => {
 
     // Add the recipient's key to the latest version's encryptedKeys
     if (srvKey) {
-      const User = require("../models/User");
       const recipientUser = await User.findOne({ email: normalizedEmail });
       if (recipientUser) {
         const latestVersion = await DocumentVersion.findOne({ fileId: file._id }).sort({ version: -1 });
@@ -83,12 +110,14 @@ router.post("/", auth, async (req, res) => {
 
     console.log("✅ FileAccess created:", access);
 
-    // Log the share action
+    // Log the share action with sharer identity
+    const sharerUser = await User.findById(req.user.id);
+    const sharerName = sharerUser?.name || sharerEmail;
     await ActivityLog.create({
       fileId: file._id,
       userId: req.user.id,
       action: "SHARED",
-      details: `Shared with ${normalizedEmail} [${perm}]${encryptedKey ? " [encrypted]" : ""} | ACL: ${file.accessList.join(", ")}`,
+      details: `${sharerName} shared with ${normalizedEmail} [${perm}]${encryptedKey ? " [encrypted]" : ""} | ACL: ${file.accessList.join(", ")}`,
     });
 
     res.json(access);

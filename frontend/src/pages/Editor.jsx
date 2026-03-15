@@ -633,6 +633,21 @@ const shareDoc = async () => {
   }
 
   try {
+    // --- SHARING A RECEIVED/SHARED FILE (re-share) ---
+    const isShared = sharedEditRef.current;
+    const existingFileId = sharedFileIdRef.current;
+    if (isShared && existingFileId) {
+      showStatus("Sharing document…");
+      await api.post("/api/share", {
+        fileId: existingFileId,
+        recipientEmail: recipientEmail.toLowerCase(),
+        permission,
+      });
+      showStatus(`🔗 Shared with ${recipientEmail} [${permission}]`);
+      return;
+    }
+
+    // --- SHARING A NEW/OWN FILE ---
     let name = docName;
     if (!name) {
       name = askForName();
