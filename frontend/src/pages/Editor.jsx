@@ -191,6 +191,12 @@ export default function Editor() {
   const [aesKey, setAesKey] = useState(""); // current doc's AES key (in memory only)
   const [showPagePanel, setShowPagePanel] = useState(true);
 
+  /* ---------- UNSAVED CHANGES TRACKING ---------- */
+  const isDirtyRef = useRef(false);
+  const lastSavedContentRef = useRef("");
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const pendingActionRef = useRef(null); // stores callback to run after save/discard
+
   /* ---------- HEADER & FOOTER SETTINGS ---------- */
   const [headerFooter, setHeaderFooter] = useState({
     enabled: false,
@@ -412,6 +418,24 @@ export default function Editor() {
 
   const navigate = useNavigate();
 
+  /* ---------- TRACK DIRTY STATE ---------- */
+  const handleContentChange = useCallback((val) => {
+    setContent(val);
+    isDirtyRef.current = val !== lastSavedContentRef.current;
+  }, []);
+
+  /* ---------- BROWSER CLOSE / REFRESH GUARD ---------- */
+  useEffect(() => {
+    const handler = (e) => {
+      if (isDirtyRef.current) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
   /* ---------- LOAD SHARED FILE FOR EDITING ---------- */
   useEffect(() => {
     if (!sharedFileId) return;
@@ -429,6 +453,8 @@ export default function Editor() {
           return;
         }
         setContent(html);
+        lastSavedContentRef.current = html;
+        isDirtyRef.current = false;
         setDocName(filename ? filename.replace(/\.[^.]+$/, "") : (sharedFilename || "Shared Document"));
         setIsSharedEdit(true);
         sharedEditRef.current = true;
@@ -464,35 +490,72 @@ export default function Editor() {
     setTimeout(() => setStatus(""), duration);
   };
 
+  /* ---------- UNSAVED CHANGES GUARD ---------- */
+  const guardUnsaved = (action) => {
+    if (!isDirtyRef.current) {
+      action();
+      return;
+    }
+    pendingActionRef.current = action;
+    setShowUnsavedModal(true);
+  };
+
+  const handleUnsavedSave = async () => {
+    setShowUnsavedModal(false);
+    await saveDoc();
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (action) action();
+  };
+
+  const handleUnsavedDiscard = () => {
+    setShowUnsavedModal(false);
+    isDirtyRef.current = false;
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (action) action();
+  };
+
+  const handleUnsavedCancel = () => {
+    setShowUnsavedModal(false);
+    pendingActionRef.current = null;
+  };
+
   /* ---------- FILE ACTIONS ---------- */
 
   const newDoc = () => {
-    if (window.confirm("Create new document? Unsaved changes will be lost.")) {
+    guardUnsaved(() => {
       setContent("");
+      lastSavedContentRef.current = "";
+      isDirtyRef.current = false;
       setDocName("");
-      setAesKey(generateAESKey()); // fresh AES key for new document
+      setAesKey(generateAESKey());
       showStatus("New document created with encryption key");
-    }
+    });
   };
 
   const openDoc = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".html,.htm,.txt";
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setContent(ev.target.result);
-        const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
-        setDocName(nameWithoutExt);
-        setAesKey(generateAESKey()); // new AES key for opened local files
-        showStatus(`Opened: ${file.name}`);
+    guardUnsaved(() => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".html,.htm,.txt";
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          setContent(ev.target.result);
+          lastSavedContentRef.current = ev.target.result;
+          isDirtyRef.current = false;
+          const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
+          setDocName(nameWithoutExt);
+          setAesKey(generateAESKey());
+          showStatus(`Opened: ${file.name}`);
+        };
+        reader.readAsText(file);
       };
-      reader.readAsText(file);
-    };
-    input.click();
+      input.click();
+    });
   };
 
   const saveDoc = async () => {
@@ -509,6 +572,8 @@ export default function Editor() {
         showStatus("Creating new version of shared document…");
         const res = await api.post(`/api/doc/edit/${fileId}`, { content });
         const { version, cid, accessList, changeSummary: cs } = res.data;
+        lastSavedContentRef.current = content;
+        isDirtyRef.current = false;
         showStatus(`✅ Version ${version} created! CID: ${cid?.substring(0, 12)}…`);
 
         // Show change summary modal so user can review and optionally share
@@ -555,6 +620,8 @@ export default function Editor() {
         aesKey: currentKey,
       });
 
+      lastSavedContentRef.current = content;
+      isDirtyRef.current = false;
       showStatus(`🔒 Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
     } catch (err) {
       console.error("Save error:", err);
@@ -628,6 +695,13 @@ export default function Editor() {
   const printDoc = () => window.print();
 
 const shareDoc = async () => {
+  if (isDirtyRef.current) {
+    const shouldSave = window.confirm("You have unsaved changes. Save before sharing?");
+    if (shouldSave) {
+      await saveDoc();
+    }
+  }
+
   const recipientEmail = prompt("Enter receiver email");
   if (!recipientEmail) return;
 
@@ -705,8 +779,10 @@ const shareDoc = async () => {
 
 
   const logout = () => {
-    localStorage.clear();
-    navigate("/login");
+    guardUnsaved(() => {
+      localStorage.clear();
+      navigate("/login");
+    });
   };
 
   /* ================= RENDER ================= */
@@ -922,7 +998,13 @@ const shareDoc = async () => {
       </div>
 
       {/* TOP TABS */}
-      <Ribbon activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Ribbon activeTab={activeTab} setActiveTab={(tab) => {
+        if (["Sent", "Inbox", "My Files"].includes(tab) && isDirtyRef.current) {
+          guardUnsaved(() => setActiveTab(tab));
+        } else {
+          setActiveTab(tab);
+        }
+      }} />
 
       {/* FILE TAB */}
       {activeTab === "File" && (
@@ -1244,7 +1326,7 @@ const shareDoc = async () => {
                     <ReactQuill
                       ref={quillRef}
                       value={content}
-                      onChange={setContent}
+                      onChange={handleContentChange}
                       scrollingContainer="#quill-scroll-container"
                       modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
                       style={{ background: 'transparent' }}
@@ -1403,6 +1485,44 @@ const shareDoc = async () => {
                   style={{ background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
                 >
                   🔗 Share This Version
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* UNSAVED CHANGES MODAL */}
+      {showUnsavedModal && (
+        <div style={versionModalStyles.overlay} onClick={handleUnsavedCancel}>
+          <div style={{ ...versionModalStyles.modal, width: 400 }} onClick={e => e.stopPropagation()}>
+            <div style={versionModalStyles.header}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>⚠️ Unsaved Changes</h3>
+              <button onClick={handleUnsavedCancel} style={versionModalStyles.closeBtn}>✕</button>
+            </div>
+            <div style={{ padding: "20px 24px" }}>
+              <p style={{ color: "#cbd5e1", fontSize: 14, margin: "0 0 20px", lineHeight: 1.6 }}>
+                You have unsaved changes in <strong style={{ color: "#60a5fa" }}>{docName || "this document"}</strong>.
+                Would you like to save before continuing?
+              </p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  onClick={handleUnsavedCancel}
+                  style={{ background: "none", border: "1px solid #475569", color: "#94a3b8", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUnsavedDiscard}
+                  style={{ background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}
+                >
+                  Discard Changes
+                </button>
+                <button
+                  onClick={handleUnsavedSave}
+                  style={{ background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
+                >
+                  💾 Save & Continue
                 </button>
               </div>
             </div>
