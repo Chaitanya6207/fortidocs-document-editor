@@ -695,13 +695,6 @@ export default function Editor() {
   const printDoc = () => window.print();
 
 const shareDoc = async () => {
-  if (isDirtyRef.current) {
-    const shouldSave = window.confirm("You have unsaved changes. Save before sharing?");
-    if (shouldSave) {
-      await saveDoc();
-    }
-  }
-
   const recipientEmail = prompt("Enter receiver email");
   if (!recipientEmail) return;
 
@@ -712,6 +705,21 @@ const shareDoc = async () => {
   if (!content || content === "<p><br></p>") {
     showStatus("Cannot share an empty document");
     return;
+  }
+
+  // If user has unsaved edits, ask whether to share modified or last-saved version
+  let shareModified = false;
+  if (isDirtyRef.current) {
+    const choice = window.confirm(
+      "You have modified this file.\n\n" +
+      "OK → Share the modified version (will save & encrypt your changes first)\n" +
+      "Cancel → Share the last saved version (without your recent edits)"
+    );
+    shareModified = choice;
+    if (shareModified) {
+      showStatus("Saving your changes before sharing…");
+      await saveDoc();
+    }
   }
 
   try {
