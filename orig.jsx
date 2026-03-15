@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from "react";
+﻿import React, { useRef, useState, useEffect, useCallback } from "react";
 import ReactQuill, { Quill } from "react-quill";
 import ImageResize from "quill-image-resize-module-react";
 import "react-quill/dist/quill.snow.css";
@@ -99,7 +99,7 @@ PageBreakBlot.tagName = "DIV";
 PageBreakBlot.className = "ql-page-break";
 Quill.register(PageBreakBlot);
 
-/* Table Embed — cells are editable */
+/* Table Embed ΓÇö cells are editable */
 class TableEmbed extends BlockEmbed {
   static create(value) {
     const node = super.create();
@@ -125,7 +125,7 @@ class TableEmbed extends BlockEmbed {
       "compositionstart", "compositionend", "compositionupdate",
     ].forEach((evt) => node.addEventListener(evt, stopKeyboard));
 
-    // For mouse events, only stop propagation on the node — not the cells —
+    // For mouse events, only stop propagation on the node ΓÇö not the cells ΓÇö
     // so Quill can't re-focus itself, but native cell focus still works.
     const stopMouse = (e) => {
       e.stopPropagation();
@@ -191,12 +191,6 @@ export default function Editor() {
   const [aesKey, setAesKey] = useState(""); // current doc's AES key (in memory only)
   const [showPagePanel, setShowPagePanel] = useState(true);
 
-  /* ---------- UNSAVED CHANGES TRACKING ---------- */
-  const isDirtyRef = useRef(false);
-  const lastSavedContentRef = useRef("");
-  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
-  const pendingActionRef = useRef(null); // stores callback to run after save/discard
-
   /* ---------- HEADER & FOOTER SETTINGS ---------- */
   const [headerFooter, setHeaderFooter] = useState({
     enabled: false,
@@ -221,14 +215,6 @@ export default function Editor() {
   const [sharedFileLoading, setSharedFileLoading] = useState(false);
   const sharedEditRef = useRef(false);
   const sharedFileIdRef = useRef(sharedFileId);
-  const [showVersionHistory, setShowVersionHistory] = useState(false);
-  const [versionHistory, setVersionHistory] = useState(null);
-  const [changeSummary, setChangeSummary] = useState(null);
-  const [showChangeSummary, setShowChangeSummary] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [shareEmail, setShareEmail] = useState("");
-  const [sharePermission, setSharePermission] = useState("VIEW");
-  const shareCallbackRef = useRef(null); // called with { email, permission }
 
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
@@ -256,7 +242,7 @@ export default function Editor() {
   const pageHeightRef = useRef(0);
   const contentHeightRef = useRef(0); // usable content height per page
   const HF_ZONE_HEIGHT = 32; // px - height for each header/footer strip
-  const PAGE_GAP = 40; // px - physical gap between paginated cards
+  const PAGE_GAP = 40; // px - visual gap between page cards
 
   // Parse margin string (e.g. "40px") to px number
   const getMarginPx = useCallback(() => {
@@ -292,7 +278,7 @@ export default function Editor() {
     return Math.max(contentH, 100);
   }, [measurePageHeightPx, getMarginPx, headerFooter.enabled]);
 
-  // Measure content height → total pages
+  // Measure content height ΓåÆ total pages
   useEffect(() => {
     const editorEl = quillRef.current?.getEditor()?.root;
     if (!editorEl) return;
@@ -303,8 +289,6 @@ export default function Editor() {
       pageHeightRef.current = ph;
       contentHeightRef.current = ch;
       if (ch <= 0) return;
-      
-      // Because we put padding on the wrapper, editor.scrollHeight is EXACTLY the true text height.
       const scrollH = editorEl.scrollHeight;
       const pages = Math.max(1, Math.ceil(scrollH / ch));
       setTotalPages(pages);
@@ -319,24 +303,13 @@ export default function Editor() {
     debouncedUpdate();
     const observer = new ResizeObserver(debouncedUpdate);
     observer.observe(editorEl);
-    
-    // ResizeObserver doesn't always fire when scrollHeight grows inside a sized container.
-    // So we also explicitly listen to Quill text-change to trigger recalculation.
-    const quill = quillRef.current?.getEditor();
-    if (quill) {
-      quill.on('text-change', debouncedUpdate);
-    }
-
     return () => {
       clearTimeout(timer);
       observer.disconnect();
-      if (quill) {
-        quill.off('text-change', debouncedUpdate);
-      }
     };
   }, [measurePageHeightPx, calcContentHeightPerPage, content]);
 
-  // Track cursor position → current page + active page auto-switch
+  // Track cursor position ΓåÆ current page + active page auto-switch
   const updateCurrentPage = useCallback(() => {
     const ed = quillRef.current?.getEditor();
     if (!ed || !contentHeightRef.current) return;
@@ -390,77 +363,22 @@ export default function Editor() {
   }, [headerFooter]);
 
   // Switch to a page card and position cursor there
-  // clickX/clickY: optional — the exact browser coordinates of the initiating click.
-  // When provided, cursor is placed precisely using caretRangeFromPoint.
-  const switchToPage = useCallback((pageIndex, clickX, clickY) => {
+  const switchToPage = useCallback((pageIndex) => {
     setActivePage(pageIndex);
     setCurrentPage(pageIndex + 1);
-
-    // Calculate where the scroll container SHOULD stay after the floating editor moves.
-    // We need this ahead-of-time so we can lock it after focus() fires.
-    const wrapEl = pageWrapRef.current;
-
-    // After React re-renders the floating editor onto the new page:
+    // After React re-render, focus Quill at the start of that page's content
     setTimeout(() => {
       const ed = quillRef.current?.getEditor();
       if (!ed || !contentHeightRef.current) return;
-
-      // --- Step 1: Set cursor ---
-      let cursorSet = false;
-      if (typeof clickX === 'number' && typeof clickY === 'number') {
-        // Use native caret‑hit‑testing for pixel‑perfect placement
-        let range = null;
-        if (document.caretRangeFromPoint) {
-          range = document.caretRangeFromPoint(clickX, clickY);
-        } else if (document.caretPositionFromPoint) {
-          const pos = document.caretPositionFromPoint(clickX, clickY);
-          if (pos) {
-            range = document.createRange();
-            range.setStart(pos.offsetNode, pos.offset);
-          }
-        }
-        if (range && range.startContainer) {
-          try {
-            const blot = Quill.find(
-              range.startContainer.nodeType === 3
-                ? range.startContainer.parentNode
-                : range.startContainer
-            );
-            if (blot) {
-              const quillIndex = ed.getIndex(blot) + range.startOffset;
-              if (typeof quillIndex === 'number' && quillIndex >= 0) {
-                ed.setSelection(quillIndex, 0, 'silent');
-                cursorSet = true;
-              }
-            }
-          } catch (_) { /* fall through */ }
-        }
-      }
-
-      if (!cursorSet) {
-        // Fallback: set cursor to approximate start of the target page
-        const targetY = pageIndex * contentHeightRef.current + 10;
+      const targetY = pageIndex * contentHeightRef.current + 10;
+      // Find the Quill index at approximately that Y position
+      const idx = ed.getSelection()?.index;
+      if (idx == null) {
+        // Try to set cursor to the area visible on this page
         const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
         ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
       }
-
-      // --- Step 2: Focus WITHOUT letting Quill scroll the container ---
-      // Quill's focus() calls scrollIntoView() internally which resets scrollTop.
-      // We defeat this by: (a) restoring scrollTop immediately after focus,
-      // and (b) temporarily overriding the container's scrollTop setter.
-      if (wrapEl) {
-        const savedScrollTop = wrapEl.scrollTop;
-        // Focus with 'silent' prevents the selection-change event from re-triggering scroll
-        ed.focus();
-        // Immediately restore scroll position (Quill may have moved it)
-        wrapEl.scrollTop = savedScrollTop;
-        // Also restore on next frame in case of async scroll
-        requestAnimationFrame(() => {
-          if (wrapEl) wrapEl.scrollTop = savedScrollTop;
-        });
-      } else {
-        ed.focus();
-      }
+      ed.focus();
     }, 50);
   }, []);
 
@@ -469,56 +387,36 @@ export default function Editor() {
     const wrapEl = pageWrapRef.current;
     if (!wrapEl || !pageHeightRef.current) return;
     const fullPageH = pageHeightRef.current;
-    const targetTop = (pageNum - 1) * (fullPageH + PAGE_GAP) * (viewSettings.zoom / 100);
+    const targetTop = (pageNum - 1) * (fullPageH + PAGE_GAP);
     wrapEl.scrollTo({ top: targetTop, behavior: 'smooth' });
     setCurrentPage(pageNum);
     setActivePage(pageNum - 1);
-  }, [viewSettings.zoom]);
+  }, []);
 
   const navigate = useNavigate();
-
-  /* ---------- TRACK DIRTY STATE ---------- */
-  const handleContentChange = useCallback((val) => {
-    setContent(val);
-    isDirtyRef.current = val !== lastSavedContentRef.current;
-  }, []);
-
-  /* ---------- BROWSER CLOSE / REFRESH GUARD ---------- */
-  useEffect(() => {
-    const handler = (e) => {
-      if (isDirtyRef.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, []);
 
   /* ---------- LOAD SHARED FILE FOR EDITING ---------- */
   useEffect(() => {
     if (!sharedFileId) return;
     let cancelled = false;
     setSharedFileLoading(true);
-    setStatus("Loading shared document…");
+    setStatus("Loading shared documentΓÇª");
 
     api.get(`/api/doc/view/${sharedFileId}`)
       .then((res) => {
         if (cancelled) return;
-        const { html, filename, permission, currentVersion } = res.data;
+        const { html, filename, permission } = res.data;
         if (permission !== "EDIT") {
           setStatus("You only have VIEW permission for this file");
           setSharedFileLoading(false);
           return;
         }
         setContent(html);
-        lastSavedContentRef.current = html;
-        isDirtyRef.current = false;
         setDocName(filename ? filename.replace(/\.[^.]+$/, "") : (sharedFilename || "Shared Document"));
         setIsSharedEdit(true);
         sharedEditRef.current = true;
         sharedFileIdRef.current = sharedFileId;
-        setStatus(`Editing shared file: "${filename || sharedFilename}" (v${currentVersion || 1})`);
+        setStatus(`Editing shared file: "${filename || sharedFilename}"`);
         setTimeout(() => setStatus(""), 3000);
       })
       .catch((err) => {
@@ -549,97 +447,51 @@ export default function Editor() {
     setTimeout(() => setStatus(""), duration);
   };
 
-  /* ---------- UNSAVED CHANGES GUARD ---------- */
-  const guardUnsaved = (action) => {
-    if (!isDirtyRef.current) {
-      action();
-      return;
-    }
-    pendingActionRef.current = action;
-    setShowUnsavedModal(true);
-  };
-
-  const handleUnsavedSave = async () => {
-    setShowUnsavedModal(false);
-    await saveDoc();
-    const action = pendingActionRef.current;
-    pendingActionRef.current = null;
-    if (action) action();
-  };
-
-  const handleUnsavedDiscard = () => {
-    setShowUnsavedModal(false);
-    isDirtyRef.current = false;
-    const action = pendingActionRef.current;
-    pendingActionRef.current = null;
-    if (action) action();
-  };
-
-  const handleUnsavedCancel = () => {
-    setShowUnsavedModal(false);
-    pendingActionRef.current = null;
-  };
-
   /* ---------- FILE ACTIONS ---------- */
 
   const newDoc = () => {
-    guardUnsaved(() => {
+    if (window.confirm("Create new document? Unsaved changes will be lost.")) {
       setContent("");
-      lastSavedContentRef.current = "";
-      isDirtyRef.current = false;
       setDocName("");
-      setAesKey(generateAESKey());
+      setAesKey(generateAESKey()); // fresh AES key for new document
       showStatus("New document created with encryption key");
-    });
+    }
   };
 
   const openDoc = () => {
-    guardUnsaved(() => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".html,.htm,.txt";
-      input.onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          setContent(ev.target.result);
-          lastSavedContentRef.current = ev.target.result;
-          isDirtyRef.current = false;
-          const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
-          setDocName(nameWithoutExt);
-          setAesKey(generateAESKey());
-          showStatus(`Opened: ${file.name}`);
-        };
-        reader.readAsText(file);
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".html,.htm,.txt";
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setContent(ev.target.result);
+        const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
+        setDocName(nameWithoutExt);
+        setAesKey(generateAESKey()); // new AES key for opened local files
+        showStatus(`Opened: ${file.name}`);
       };
-      input.click();
-    });
+      reader.readAsText(file);
+    };
+    input.click();
   };
 
   const saveDoc = async () => {
     if (!content || content === "<p><br></p>") {
-      showStatus("Nothing to save — document is empty");
+      showStatus("Nothing to save ΓÇö document is empty");
       return;
     }
 
-    // --- SHARED FILE EDIT SAVE (creates new version) ---
+    // --- SHARED FILE EDIT SAVE ---
     const isShared = sharedEditRef.current;
     const fileId = sharedFileIdRef.current;
     if (isShared && fileId) {
       try {
-        showStatus("Creating new version of shared document…");
+        showStatus("Saving edits to shared documentΓÇª");
         const res = await api.post(`/api/doc/edit/${fileId}`, { content });
-        const { version, cid, accessList, changeSummary: cs } = res.data;
-        lastSavedContentRef.current = content;
-        isDirtyRef.current = false;
-        showStatus(`✅ Version ${version} created! CID: ${cid?.substring(0, 12)}…`);
-
-        // Show change summary modal so user can review and optionally share
-        if (cs) {
-          setChangeSummary({ ...cs, version, cid, filename: res.data.filename || docName });
-          setShowChangeSummary(true);
-        }
+        showStatus(`Γ£à Edits saved! CID: ${res.data.cid?.substring(0, 12)}ΓÇª`);
       } catch (err) {
         console.error("Shared edit save error:", err);
         showStatus(err.response?.data?.error || "Failed to save edits");
@@ -652,7 +504,7 @@ export default function Editor() {
     if (!name) {
       name = askForName();
       if (!name) {
-        showStatus("Save cancelled — no filename provided");
+        showStatus("Save cancelled ΓÇö no filename provided");
         return;
       }
     }
@@ -665,7 +517,7 @@ export default function Editor() {
         setAesKey(currentKey);
       }
 
-      showStatus("Encrypting & saving to IPFS…");
+      showStatus("Encrypting & saving to IPFSΓÇª");
 
       // 1. Encrypt content with AES key
       const encryptedContent = encryptAES(content, currentKey);
@@ -679,38 +531,16 @@ export default function Editor() {
         aesKey: currentKey,
       });
 
-      lastSavedContentRef.current = content;
-      isDirtyRef.current = false;
-      showStatus(`🔒 Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
+      showStatus(`≡ƒöÆ Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}ΓÇª`);
     } catch (err) {
       console.error("Save error:", err);
       showStatus(err.response?.data?.error || "Cloud save failed");
     }
   };
 
-  const loadVersionHistory = async () => {
-    const fileId = sharedFileIdRef.current;
-    if (!fileId) return;
-    try {
-      const res = await api.get(`/api/doc/versions/${fileId}`);
-      setVersionHistory(res.data);
-      setShowVersionHistory(true);
-    } catch (err) {
-      console.error("Failed to load version history:", err);
-      showStatus("Failed to load version history");
-    }
-  };
-
-  // Auto-load version history when modal is opened
-  useEffect(() => {
-    if (showVersionHistory && sharedFileIdRef.current) {
-      loadVersionHistory();
-    }
-  }, [showVersionHistory]);
-
   const saveLocalDoc = () => {
     if (!content || content === "<p><br></p>") {
-      showStatus("Nothing to save — document is empty");
+      showStatus("Nothing to save ΓÇö document is empty");
       return;
     }
 
@@ -718,7 +548,7 @@ export default function Editor() {
     if (!name) {
       name = askForName(docName || "document");
       if (!name) {
-        showStatus("Save cancelled — no filename provided");
+        showStatus("Save cancelled ΓÇö no filename provided");
         return;
       }
     }
@@ -738,7 +568,7 @@ export default function Editor() {
   const saveAsDoc = () => {
     const name = askForName(docName || "document");
     if (!name) {
-      showStatus("Save As cancelled — no filename provided");
+      showStatus("Save As cancelled ΓÇö no filename provided");
       return;
     }
     const blob = htmlDocx.asBlob(content);
@@ -757,7 +587,7 @@ const shareDoc = async () => {
   const recipientEmail = prompt("Enter receiver email");
   if (!recipientEmail) return;
 
-  const permChoice = prompt("Permission — type VIEW or EDIT:", "VIEW");
+  const permChoice = prompt("Permission ΓÇö type VIEW or EDIT:", "VIEW");
   if (!permChoice) return;
   const permission = permChoice.trim().toUpperCase() === "EDIT" ? "EDIT" : "VIEW";
 
@@ -766,47 +596,17 @@ const shareDoc = async () => {
     return;
   }
 
-  // If user has unsaved edits, ask whether to share modified or last-saved version
-  let shareModified = false;
-  if (isDirtyRef.current) {
-    const choice = window.confirm(
-      "You have modified this file.\n\n" +
-      "OK → Share the modified version (will save & encrypt your changes first)\n" +
-      "Cancel → Share the last saved version (without your recent edits)"
-    );
-    shareModified = choice;
-    if (shareModified) {
-      showStatus("Saving your changes before sharing…");
-      await saveDoc();
-    }
-  }
-
   try {
-    // --- SHARING A RECEIVED/SHARED FILE (re-share) ---
-    const isShared = sharedEditRef.current;
-    const existingFileId = sharedFileIdRef.current;
-    if (isShared && existingFileId) {
-      showStatus("Sharing document…");
-      await api.post("/api/share", {
-        fileId: existingFileId,
-        recipientEmail: recipientEmail.toLowerCase(),
-        permission,
-      });
-      showStatus(`🔗 Shared with ${recipientEmail} [${permission}]`);
-      return;
-    }
-
-    // --- SHARING A NEW/OWN FILE ---
     let name = docName;
     if (!name) {
       name = askForName();
       if (!name) {
-        showStatus("Share cancelled — no filename provided");
+        showStatus("Share cancelled ΓÇö no filename provided");
         return;
       }
     }
 
-    showStatus("Encrypting, saving & sharing…");
+    showStatus("Encrypting, saving & sharingΓÇª");
 
     // Ensure AES key exists
     let currentKey = aesKey;
@@ -827,7 +627,7 @@ const shareDoc = async () => {
     });
     const file = saveRes.data;
 
-    // 3. Share — server stores a server-encrypted key for the recipient
+    // 3. Share ΓÇö server stores a server-encrypted key for the recipient
     await api.post("/api/share", {
       fileId: file._id,
       recipientEmail: recipientEmail.toLowerCase(),
@@ -835,7 +635,7 @@ const shareDoc = async () => {
       permission,
     });
 
-    showStatus(`🔒 Encrypted & shared with ${recipientEmail} [${permission}]`);
+    showStatus(`≡ƒöÆ Encrypted & shared with ${recipientEmail} [${permission}]`);
   } catch (err) {
     console.error("Share error:", err.response?.data || err);
     showStatus(err.response?.data?.error || "Share failed");
@@ -846,10 +646,8 @@ const shareDoc = async () => {
 
 
   const logout = () => {
-    guardUnsaved(() => {
-      localStorage.clear();
-      navigate("/login");
-    });
+    localStorage.clear();
+    navigate("/login");
   };
 
   /* ================= RENDER ================= */
@@ -917,8 +715,8 @@ const shareDoc = async () => {
             overflow: visible !important;
           }
         }
-        /* ---- Page cards & Floating Editor ---- */
-        .doc-page-card, .floating-editor-viewport {
+        /* ---- Page cards ---- */
+        .doc-page-card {
           position: relative;
           box-sizing: border-box;
           border-radius: 4px;
@@ -926,11 +724,11 @@ const shareDoc = async () => {
           flex-direction: column;
           overflow: hidden;
         }
-        .doc-page-card .ql-container, .floating-editor-viewport .ql-container {
+        .doc-page-card .ql-container {
           border: none !important;
           font-size: inherit;
         }
-        .doc-page-card .ql-editor, .floating-editor-viewport .ql-editor {
+        .doc-page-card .ql-editor {
           overflow: visible !important;
           height: auto !important;
           padding: 0 !important;
@@ -1031,7 +829,7 @@ const shareDoc = async () => {
               fontWeight: 600,
               marginLeft: 8,
             }}>
-              ✏️ Editing Shared File
+              Γ£Å∩╕Å Editing Shared File
             </span>
           )}
         </div>
@@ -1045,19 +843,10 @@ const shareDoc = async () => {
               className="btn btn-success btn-sm"
               style={{ fontWeight: 600 }}
             >
-              💾 Save to Cloud
+              ≡ƒÆ╛ Save to Cloud
             </button>
           )}
-          {isSharedEdit && sharedFileId && (
-            <button
-              onClick={() => setShowVersionHistory(true)}
-              className="btn btn-ghost btn-sm"
-              style={{ fontWeight: 600 }}
-            >
-              📜 Version History
-            </button>
-          )}
-          <span style={styles.userBadge}>👤 {user?.name || user?.email || "User"}</span>
+          <span style={styles.userBadge}>≡ƒæñ {user?.name || user?.email || "User"}</span>
           <button onClick={logout} className="btn btn-danger btn-sm">
             Logout
           </button>
@@ -1065,13 +854,7 @@ const shareDoc = async () => {
       </div>
 
       {/* TOP TABS */}
-      <Ribbon activeTab={activeTab} setActiveTab={(tab) => {
-        if (["Sent", "Inbox", "My Files"].includes(tab) && isDirtyRef.current) {
-          guardUnsaved(() => setActiveTab(tab));
-        } else {
-          setActiveTab(tab);
-        }
-      }} />
+      <Ribbon activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* FILE TAB */}
       {activeTab === "File" && (
@@ -1130,7 +913,7 @@ const shareDoc = async () => {
       {sharedFileLoading && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 12 }}>
           <div className="spinner" />
-          <p style={{ color: "#64748b", fontSize: 14 }}>Loading shared document…</p>
+          <p style={{ color: "#64748b", fontSize: 14 }}>Loading shared documentΓÇª</p>
         </div>
       )}
 
@@ -1147,7 +930,7 @@ const shareDoc = async () => {
                   onClick={() => setShowPagePanel(false)}
                   title="Close panel"
                 >
-                  ✕
+                  Γ£ò
                 </button>
               </div>
               <div style={styles.pagePanelList}>
@@ -1165,65 +948,50 @@ const shareDoc = async () => {
                       title={`Go to page ${pageNum}`}
                     >
                       <div style={styles.pageThumbnailInner}>
-                        {/* Scaled-down replica of the main editor page-clip technique */}
-                        {(() => {
-                          // Thumbnail inner width in px (matches pageThumbnailInner)
-                          const thumbW = 104;
-                          // Real page width px from mm setting
-                          const realPageMm = parseFloat(
-                            pageSettings.orientation === "landscape" ? pageSettings.height : pageSettings.width
-                          ) || 210;
-                          const realPagePx = (realPageMm / 25.4) * 96;
-                          const scale = thumbW / realPagePx;
-                          const thumbContentH = contentHeightRef.current || calcContentHeightPerPage();
-                          const thumbMarginPx = getMarginPx();
-                          const contentOffset = (pageNum - 1) * thumbContentH;
-                          return (
-                            // Clip box — fixed, scissors off what's outside this page band
-                            <div style={{
-                              width: '100%',
-                              height: '100%',
-                              overflow: 'hidden',
-                              position: 'relative',
-                              pointerEvents: 'none',
-                              background: '#fff',
-                            }}>
-                              {/*
-                                Scale wrapper: position:absolute so it can grow to realPagePx wide
-                                then CSS transform scales it back down to thumbW.
-                                This means the inner content uses real-page coordinates and
-                                marginTop: -contentOffset works correctly with overflow:hidden.
-                              */}
-                              <div style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: realPagePx,
-                                transformOrigin: 'top left',
-                                transform: `scale(${scale})`,
-                                pointerEvents: 'none',
-                              }}>
-                                <div
-                                  className="ql-snow"
-                                  style={{ background: 'transparent' }}
-                                >
-                                  <div
-                                    className="ql-editor"
-                                    style={{
-                                      padding: `${thumbMarginPx}px`,
-                                      marginTop: -contentOffset,
-                                      overflow: 'visible',
-                                      pointerEvents: 'none',
-                                      userSelect: 'none',
-                                      minHeight: 0,
-                                    }}
-                                    dangerouslySetInnerHTML={{ __html: content }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div
+                          className="ql-snow"
+                          style={styles.pageThumbnailContent}
+                        >
+                          <div
+                            className="ql-editor"
+                            style={{
+                              fontSize: "1.6px",
+                              lineHeight: "1.4",
+                              padding: "3px",
+                              overflow: "hidden",
+                              pointerEvents: "none",
+                              maxHeight: "100%",
+                            }}
+                            dangerouslySetInnerHTML={{
+                              __html: (() => {
+                                if (!content) return "";
+                                const div = document.createElement("div");
+                                div.innerHTML = content;
+                                const allNodes = div.querySelectorAll("*");
+                                // Rough split: each page ~ equal portion of content
+                                const totalChars = div.textContent.length || 1;
+                                const charsPerPage = Math.ceil(totalChars / totalPages);
+                                const startChar = (pageNum - 1) * charsPerPage;
+                                const endChar = pageNum * charsPerPage;
+                                // Simple: return full HTML for page 1 thumbnail, sliced for others
+                                if (totalPages === 1) return content;
+                                // Extract approximate slice for this page
+                                let charCount = 0;
+                                let result = "";
+                                for (const child of div.childNodes) {
+                                  const nodeText = child.textContent || "";
+                                  const nodeEnd = charCount + nodeText.length;
+                                  if (nodeEnd > startChar && charCount < endChar) {
+                                    result += child.outerHTML || child.textContent;
+                                  }
+                                  charCount = nodeEnd;
+                                  if (charCount >= endChar) break;
+                                }
+                                return result;
+                              })(),
+                            }}
+                          />
+                        </div>
                       </div>
                       <span style={{
                         ...styles.pageThumbnailLabel,
@@ -1245,12 +1013,11 @@ const shareDoc = async () => {
               onClick={() => setShowPagePanel(true)}
               title="Show page panel"
             >
-              📄
+              ≡ƒôä
             </button>
           )}
 
           <div
-            id="quill-scroll-container"
             ref={pageWrapRef}
             style={{
               ...styles.pageWrap,
@@ -1270,7 +1037,7 @@ const shareDoc = async () => {
             </div>
           )}
 
-          {/* ---- SINGLE FLOATING EDITOR & PAGE CARDS ---- */}
+          {/* ---- PAGINATED PAGE CARDS ---- */}
           {(() => {
             const pageW = viewSettings.viewMode === "web" ? "100%"
               : pageSettings.orientation === "landscape"
@@ -1293,17 +1060,8 @@ const shareDoc = async () => {
             }
 
             return (
-              <div 
-                style={{ 
-                  transform: `scale(${viewSettings.zoom / 100})`, 
-                  transformOrigin: "top center",
-                  width: pageW,
-                  position: "relative",
-                  minHeight: pageH * totalPages + PAGE_GAP * (totalPages - 1),
-                }}
-              >
-                {/* 1. RENDER PAGE BACKGROUNDS & MIRRORS */}
-                {Array.from({ length: Math.max(1, totalPages) }, (_, i) => {
+              <div style={{ transform: `scale(${viewSettings.zoom / 100})`, transformOrigin: "top center" }}>
+                {Array.from({ length: totalPages }, (_, i) => {
                   const pageNum = i + 1;
                   const isActive = i === activePage;
                   const contentOffset = i * contentH;
@@ -1312,11 +1070,12 @@ const shareDoc = async () => {
                   const hasFooter = hf && (hf.fL || hf.fC || hf.fR);
 
                   return (
-                    <React.Fragment key={`page-bg-${pageNum}`}>
-                      {i > 0 && viewSettings.viewMode !== "web" && (
+                    <React.Fragment key={`page-${pageNum}`}>
+                      {/* Gap between pages */}
+                      {i > 0 && (
                         <div className="page-card-gap" style={{
                           height: PAGE_GAP,
-                          background: viewSettings.darkMode ? '#1e293b' : 'transparent',
+                          background: viewSettings.darkMode ? '#1e293b' : '#e5e7eb',
                         }}>
                           <span style={{
                             fontSize: 9, color: '#94a3b8', fontWeight: 600,
@@ -1325,19 +1084,23 @@ const shareDoc = async () => {
                           }}>Page {pageNum}</span>
                         </div>
                       )}
+                      {/* Page card */}
                       <div
                         className="doc-page-card"
                         style={{
-                          width: "100%",
+                          width: pageW,
                           height: viewSettings.viewMode === "web" ? 'auto' : pageH,
                           backgroundColor: pageSettings.pageColor,
                           border: pageSettings.pageBorder,
                           boxShadow: viewSettings.viewMode === "focus" ? "none" : "0 2px 16px rgba(0,0,0,0.08)",
                           ...gridBg,
+                          ...(viewSettings.viewMode === "focus" ? { maxWidth: 700, border: "none" } : {}),
                         }}
                       >
+                        {/* Top margin */}
                         <div style={{ height: marginPx, flexShrink: 0 }} />
-                        
+
+                        {/* Header strip */}
                         {hasHeader && (
                           <div className="page-hf-strip" style={{
                             height: hfZone, padding: `0 ${marginPx}px`,
@@ -1346,41 +1109,44 @@ const shareDoc = async () => {
                             <span>{hf.hL}</span><span>{hf.hC}</span><span>{hf.hR}</span>
                           </div>
                         )}
-                        
-                        {/* Page Mirror Viewport */}
+
+                        {/* Content viewport ΓÇö clips content to this page's slice */}
                         <div
                           className="page-content-viewport"
                           style={{
                             height: contentH,
                             padding: `0 ${marginPx}px`,
-                            visibility: isActive ? "hidden" : "visible",
                           }}
-                          onMouseDown={(e) => {
-                            if (!isActive) {
-                              // Capture click coordinates BEFORE React re-renders
-                              // (after re-render the mirror is hidden & floating editor takes over)
-                              const cx = e.clientX;
-                              const cy = e.clientY;
-                              // Prevent the browser from processing this as a text selection
-                              // (the mirror content is non-interactive)
-                              e.preventDefault();
-                              switchToPage(i, cx, cy);
-                            }
-                          }}
+                          onClick={() => { if (!isActive) switchToPage(i); }}
                         >
-                          <div
-                            className="page-mirror-content"
-                            style={{ marginTop: -contentOffset }}
-                          >
-                            <div className="ql-snow" style={{ background: 'transparent' }}>
-                              <div
-                                className="ql-editor"
-                                dangerouslySetInnerHTML={{ __html: content }}
+                          {isActive ? (
+                            /* Active page: real Quill editor, offset to show this page's slice */
+                            <div style={{ marginTop: -contentOffset }}>
+                              <ReactQuill
+                                ref={quillRef}
+                                value={content}
+                                onChange={setContent}
+                                modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
+                                style={{ background: 'transparent' }}
                               />
                             </div>
-                          </div>
+                          ) : (
+                            /* Non-active page: read-only mirror, offset to show this page's slice */
+                            <div
+                              className="page-mirror-content"
+                              style={{ marginTop: -contentOffset }}
+                            >
+                              <div className="ql-snow" style={{ background: 'transparent' }}>
+                                <div
+                                  className="ql-editor"
+                                  dangerouslySetInnerHTML={{ __html: content }}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
 
+                        {/* Footer strip */}
                         {hasFooter && (
                           <div className="page-hf-strip" style={{
                             height: hfZone, padding: `0 ${marginPx}px`,
@@ -1389,83 +1155,13 @@ const shareDoc = async () => {
                             <span>{hf.fL}</span><span>{hf.fC}</span><span>{hf.fR}</span>
                           </div>
                         )}
-                        
+
+                        {/* Bottom margin */}
                         <div style={{ height: marginPx, flexShrink: 0 }} />
                       </div>
                     </React.Fragment>
                   );
                 })}
-
-                {/* 2. SINGLE FLOATING EDITOR (Overlays Active Page) */}
-                <div 
-                  className="floating-editor-viewport"
-                  style={{
-                    position: "absolute",
-                    top: activePage * (pageH + PAGE_GAP) + marginPx + hfZone, // Physical jump coordinates
-                    left: 0,
-                    right: 0,
-                    height: contentH,
-                    padding: `0 ${marginPx}px`,
-                    overflow: "hidden", // Clips editor visually to active page boundaries
-                    zIndex: 10,
-                    boxSizing: "border-box",
-                  }}
-                  onMouseDown={(e) => {
-                    const ed = quillRef.current?.getEditor();
-                    if (!ed) return;
-
-                    // Use the browser's native caret-hit-testing to get the exact DOM position.
-                    // This is the most accurate approach because it bypasses Quill's coordinate
-                    // math which is wrong when the editor is shifted by a negative marginTop.
-                    let range = null;
-                    if (document.caretRangeFromPoint) {
-                      // Chrome / Safari
-                      range = document.caretRangeFromPoint(e.clientX, e.clientY);
-                    } else if (document.caretPositionFromPoint) {
-                      // Firefox
-                      const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
-                      if (pos) {
-                        range = document.createRange();
-                        range.setStart(pos.offsetNode, pos.offset);
-                      }
-                    }
-
-                    if (range && range.startContainer) {
-                      try {
-                        // Convert the DOM range to a Quill index
-                        const quillIndex = ed.getIndex(
-                          Quill.find(range.startContainer.nodeType === 3
-                            ? range.startContainer.parentNode
-                            : range.startContainer)
-                        ) + range.startOffset;
-                        if (typeof quillIndex === 'number' && quillIndex >= 0) {
-                          // Prevent Quill's own (broken) click handler from overriding our selection
-                          e.preventDefault();
-                          ed.setSelection(quillIndex, 0, 'user');
-                          ed.focus();
-                          return;
-                        }
-                      } catch (_) {
-                        // Fallback: let Quill handle it normally
-                      }
-                    }
-
-                    // Fallback: just focus the editor
-                    if (!ed.hasFocus()) ed.focus();
-                  }}
-                >
-                  <div style={{ marginTop: -activePage * contentH }}>
-                    <ReactQuill
-                      ref={quillRef}
-                      value={content}
-                      onChange={handleContentChange}
-                      scrollingContainer="#quill-scroll-container"
-                      modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
-                      style={{ background: 'transparent' }}
-                    />
-                  </div>
-                </div>
-
               </div>
             );
           })()}
@@ -1475,270 +1171,6 @@ const shareDoc = async () => {
             <span>Page {currentPage} of {totalPages}</span>
             {status && <span style={styles.statusMsg}>{status}</span>}
           </div>
-          </div>
-        </div>
-      )}
-
-      {/* VERSION HISTORY MODAL */}
-      {showVersionHistory && (
-        <div style={versionModalStyles.overlay} onClick={() => setShowVersionHistory(false)}>
-          <div style={versionModalStyles.modal} onClick={e => e.stopPropagation()}>
-            <div style={versionModalStyles.header}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>📜 Version History</h3>
-              <button onClick={() => setShowVersionHistory(false)} style={versionModalStyles.closeBtn}>✕</button>
-            </div>
-            {versionHistory ? (
-              <div style={versionModalStyles.body}>
-                <div style={{ marginBottom: 12, fontSize: 13, color: "#94a3b8" }}>
-                  <strong>{versionHistory.filename}</strong> — {versionHistory.versions?.length || 0} version(s)
-                  <br />
-                  Access List: {(versionHistory.accessList || []).join(", ") || "—"}
-                </div>
-                <div style={versionModalStyles.versionList}>
-                  {(versionHistory.versions || []).map(v => (
-                    <div key={v.version} style={versionModalStyles.versionCard}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: 700, color: "#60a5fa" }}>
-                          Version {v.version}
-                          {v.version === versionHistory.currentVersion && (
-                            <span style={{ color: "#4ade80", marginLeft: 8, fontSize: 11 }}>(current)</span>
-                          )}
-                        </span>
-                        <span style={{ fontSize: 11, color: "#64748b" }}>
-                          {v.createdAt ? new Date(v.createdAt).toLocaleString() : ""}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 4 }}>
-                        Editor: {v.editor?.name || v.editor?.email || "Unknown"}
-                        {v.editor?.wallet && <span style={{ color: "#94a3b8" }}> ({v.editor.wallet.substring(0, 8)}…)</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
-                        CID: {v.cid?.substring(0, 20)}…
-                        {v.previousCid && <span> | Prev: {v.previousCid.substring(0, 12)}…</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
-                        {v.encrypted && <span style={{ color: "#fbbf24" }}>🔒 Encrypted</span>}
-                        {v.blockchainTxHash && (
-                          <span style={{ color: "#4ade80", marginLeft: 8 }}>
-                            ⛓ On-chain: {v.blockchainTxHash.substring(0, 12)}…
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-                        Authorized: {(v.authorizedUsers || []).join(", ")}
-                      </div>
-                      {v.fileHash && (
-                        <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>
-                          Hash: {v.fileHash.substring(0, 24)}…
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div style={{ padding: 20, textAlign: "center", color: "#94a3b8" }}>Loading…</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* CHANGE SUMMARY MODAL */}
-      {showChangeSummary && changeSummary && (
-        <div style={versionModalStyles.overlay} onClick={() => setShowChangeSummary(false)}>
-          <div style={{ ...versionModalStyles.modal, width: 480 }} onClick={e => e.stopPropagation()}>
-            <div style={versionModalStyles.header}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>📊 Changes Saved — Version {changeSummary.version}</h3>
-              <button onClick={() => setShowChangeSummary(false)} style={versionModalStyles.closeBtn}>✕</button>
-            </div>
-            <div style={versionModalStyles.body}>
-              <div style={{ marginBottom: 14, fontSize: 13, color: "#cbd5e1" }}>
-                Your edits to <strong style={{ color: "#60a5fa" }}>{changeSummary.filename || docName}</strong> have been saved as a new version on IPFS.
-              </div>
-
-              {/* Change stats */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-                <div style={csStatCard}>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80" }}>+{changeSummary.addedWords}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Words Added</div>
-                </div>
-                <div style={csStatCard}>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>-{changeSummary.removedWords}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Words Removed</div>
-                </div>
-                <div style={csStatCard}>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: "#fbbf24" }}>{changeSummary.changePercent}%</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Content Changed</div>
-                </div>
-                <div style={csStatCard}>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: "#60a5fa" }}>{changeSummary.newWordCount}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Total Words</div>
-                </div>
-              </div>
-
-              {/* Detail line */}
-              <div style={{ background: "#0f172a", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#94a3b8", border: "1px solid #334155" }}>
-                {changeSummary.summary}
-              </div>
-
-              {/* CID info */}
-              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16 }}>
-                New CID: <span style={{ color: "#60a5fa" }}>{changeSummary.cid?.substring(0, 24)}…</span>
-              </div>
-
-              {/* Action buttons */}
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button
-                  onClick={() => setShowChangeSummary(false)}
-                  style={{ background: "#334155", color: "#e2e8f0", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer" }}
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => {
-                    setShowChangeSummary(false);
-                    shareCallbackRef.current = async (email, permission) => {
-                      try {
-                        showStatus("Sharing document…");
-                        await api.post("/api/share", {
-                          fileId: sharedFileIdRef.current,
-                          recipientEmail: email.toLowerCase(),
-                          permission,
-                        });
-                        showStatus(`🔗 Shared v${changeSummary.version} with ${email} [${permission}]`);
-                      } catch (err) {
-                        showStatus(err.response?.data?.error || "Share failed");
-                      }
-                    };
-                    setShareEmail("");
-                    setSharePermission("VIEW");
-                    setShowShareModal(true);
-                  }}
-                  style={{ background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
-                >
-                  🔗 Share This Version
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SHARE MODAL */}
-      {showShareModal && (
-        <div style={versionModalStyles.overlay} onClick={() => setShowShareModal(false)}>
-          <div style={{ ...versionModalStyles.modal, width: 420 }} onClick={e => e.stopPropagation()}>
-            <div style={versionModalStyles.header}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>🔗 Share Document</h3>
-              <button onClick={() => setShowShareModal(false)} style={versionModalStyles.closeBtn}>✕</button>
-            </div>
-            <div style={{ padding: "20px 24px" }}>
-              <label style={{ display: "block", fontSize: 13, color: "#94a3b8", marginBottom: 6 }}>Recipient Email</label>
-              <input
-                type="email"
-                value={shareEmail}
-                onChange={e => setShareEmail(e.target.value)}
-                placeholder="user@example.com"
-                autoFocus
-                style={{
-                  width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #475569",
-                  background: "#0f172a", color: "#f1f5f9", fontSize: 14, outline: "none", boxSizing: "border-box",
-                }}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && shareEmail.trim()) {
-                    setShowShareModal(false);
-                    shareCallbackRef.current?.(shareEmail.trim(), sharePermission);
-                  }
-                }}
-              />
-
-              <label style={{ display: "block", fontSize: 13, color: "#94a3b8", marginTop: 18, marginBottom: 8 }}>Permission</label>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button
-                  onClick={() => setSharePermission("VIEW")}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer",
-                    border: sharePermission === "VIEW" ? "2px solid #3b82f6" : "1px solid #475569",
-                    background: sharePermission === "VIEW" ? "rgba(59,130,246,0.15)" : "#0f172a",
-                    color: sharePermission === "VIEW" ? "#60a5fa" : "#94a3b8",
-                  }}
-                >
-                  👁 View Only
-                </button>
-                <button
-                  onClick={() => setSharePermission("EDIT")}
-                  style={{
-                    flex: 1, padding: "10px 0", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer",
-                    border: sharePermission === "EDIT" ? "2px solid #22c55e" : "1px solid #475569",
-                    background: sharePermission === "EDIT" ? "rgba(34,197,94,0.15)" : "#0f172a",
-                    color: sharePermission === "EDIT" ? "#4ade80" : "#94a3b8",
-                  }}
-                >
-                  ✏️ Can Edit
-                </button>
-              </div>
-
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
-                <button
-                  onClick={() => setShowShareModal(false)}
-                  style={{ background: "#334155", color: "#e2e8f0", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={!shareEmail.trim()}
-                  onClick={() => {
-                    setShowShareModal(false);
-                    shareCallbackRef.current?.(shareEmail.trim(), sharePermission);
-                  }}
-                  style={{
-                    background: shareEmail.trim() ? "linear-gradient(135deg, #2563eb, #7c3aed)" : "#334155",
-                    color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: shareEmail.trim() ? "pointer" : "not-allowed",
-                    fontWeight: 600, opacity: shareEmail.trim() ? 1 : 0.5,
-                  }}
-                >
-                  🔗 Share [{sharePermission}]
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* UNSAVED CHANGES MODAL */}
-      {showUnsavedModal && (
-        <div style={versionModalStyles.overlay} onClick={handleUnsavedCancel}>
-          <div style={{ ...versionModalStyles.modal, width: 400 }} onClick={e => e.stopPropagation()}>
-            <div style={versionModalStyles.header}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>⚠️ Unsaved Changes</h3>
-              <button onClick={handleUnsavedCancel} style={versionModalStyles.closeBtn}>✕</button>
-            </div>
-            <div style={{ padding: "20px 24px" }}>
-              <p style={{ color: "#cbd5e1", fontSize: 14, margin: "0 0 20px", lineHeight: 1.6 }}>
-                You have unsaved changes in <strong style={{ color: "#60a5fa" }}>{docName || "this document"}</strong>.
-                Would you like to save before continuing?
-              </p>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button
-                  onClick={handleUnsavedCancel}
-                  style={{ background: "none", border: "1px solid #475569", color: "#94a3b8", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleUnsavedDiscard}
-                  style={{ background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}
-                >
-                  Discard Changes
-                </button>
-                <button
-                  onClick={handleUnsavedSave}
-                  style={{ background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
-                >
-                  💾 Save & Continue
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -1952,66 +1384,5 @@ const styles = {
   statusMsg: {
     color: "#2563eb",
     fontWeight: 600,
-  },
-};
-
-const csStatCard = {
-  background: "#0f172a",
-  borderRadius: 8,
-  padding: "12px 14px",
-  textAlign: "center",
-  border: "1px solid #334155",
-};
-
-const versionModalStyles = {
-  overlay: {
-    position: "fixed",
-    top: 0, left: 0, right: 0, bottom: 0,
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10000,
-  },
-  modal: {
-    background: "#1e293b",
-    borderRadius: 12,
-    width: 520,
-    maxHeight: "80vh",
-    display: "flex",
-    flexDirection: "column",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-    border: "1px solid #334155",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "14px 20px",
-    borderBottom: "1px solid #334155",
-    color: "#f1f5f9",
-  },
-  closeBtn: {
-    background: "none",
-    border: "none",
-    color: "#94a3b8",
-    fontSize: 18,
-    cursor: "pointer",
-  },
-  body: {
-    padding: "16px 20px",
-    overflowY: "auto",
-    flex: 1,
-  },
-  versionList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
-  versionCard: {
-    background: "#0f172a",
-    borderRadius: 8,
-    padding: "12px 14px",
-    border: "1px solid #334155",
   },
 };
