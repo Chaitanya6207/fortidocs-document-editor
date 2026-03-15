@@ -225,6 +225,10 @@ export default function Editor() {
   const [versionHistory, setVersionHistory] = useState(null);
   const [changeSummary, setChangeSummary] = useState(null);
   const [showChangeSummary, setShowChangeSummary] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharePermission, setSharePermission] = useState("VIEW");
+  const shareCallbackRef = useRef(null); // called with { email, permission }
 
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
@@ -1471,28 +1475,109 @@ const shareDoc = async () => {
                   Close
                 </button>
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     setShowChangeSummary(false);
-                    const email = prompt("Share this version with (enter email):");
-                    if (!email) return;
-                    const perm = prompt("Permission — type VIEW or EDIT:", "VIEW");
-                    if (!perm) return;
-                    const permission = perm.trim().toUpperCase() === "EDIT" ? "EDIT" : "VIEW";
-                    try {
-                      showStatus("Sharing document…");
-                      await api.post("/api/share", {
-                        fileId: sharedFileIdRef.current,
-                        recipientEmail: email.toLowerCase(),
-                        permission,
-                      });
-                      showStatus(`🔗 Shared v${changeSummary.version} with ${email} [${permission}]`);
-                    } catch (err) {
-                      showStatus(err.response?.data?.error || "Share failed");
-                    }
+                    shareCallbackRef.current = async (email, permission) => {
+                      try {
+                        showStatus("Sharing document…");
+                        await api.post("/api/share", {
+                          fileId: sharedFileIdRef.current,
+                          recipientEmail: email.toLowerCase(),
+                          permission,
+                        });
+                        showStatus(`🔗 Shared v${changeSummary.version} with ${email} [${permission}]`);
+                      } catch (err) {
+                        showStatus(err.response?.data?.error || "Share failed");
+                      }
+                    };
+                    setShareEmail("");
+                    setSharePermission("VIEW");
+                    setShowShareModal(true);
                   }}
                   style={{ background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
                 >
                   🔗 Share This Version
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHARE MODAL */}
+      {showShareModal && (
+        <div style={versionModalStyles.overlay} onClick={() => setShowShareModal(false)}>
+          <div style={{ ...versionModalStyles.modal, width: 420 }} onClick={e => e.stopPropagation()}>
+            <div style={versionModalStyles.header}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>🔗 Share Document</h3>
+              <button onClick={() => setShowShareModal(false)} style={versionModalStyles.closeBtn}>✕</button>
+            </div>
+            <div style={{ padding: "20px 24px" }}>
+              <label style={{ display: "block", fontSize: 13, color: "#94a3b8", marginBottom: 6 }}>Recipient Email</label>
+              <input
+                type="email"
+                value={shareEmail}
+                onChange={e => setShareEmail(e.target.value)}
+                placeholder="user@example.com"
+                autoFocus
+                style={{
+                  width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #475569",
+                  background: "#0f172a", color: "#f1f5f9", fontSize: 14, outline: "none", boxSizing: "border-box",
+                }}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && shareEmail.trim()) {
+                    setShowShareModal(false);
+                    shareCallbackRef.current?.(shareEmail.trim(), sharePermission);
+                  }
+                }}
+              />
+
+              <label style={{ display: "block", fontSize: 13, color: "#94a3b8", marginTop: 18, marginBottom: 8 }}>Permission</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={() => setSharePermission("VIEW")}
+                  style={{
+                    flex: 1, padding: "10px 0", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer",
+                    border: sharePermission === "VIEW" ? "2px solid #3b82f6" : "1px solid #475569",
+                    background: sharePermission === "VIEW" ? "rgba(59,130,246,0.15)" : "#0f172a",
+                    color: sharePermission === "VIEW" ? "#60a5fa" : "#94a3b8",
+                  }}
+                >
+                  👁 View Only
+                </button>
+                <button
+                  onClick={() => setSharePermission("EDIT")}
+                  style={{
+                    flex: 1, padding: "10px 0", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer",
+                    border: sharePermission === "EDIT" ? "2px solid #22c55e" : "1px solid #475569",
+                    background: sharePermission === "EDIT" ? "rgba(34,197,94,0.15)" : "#0f172a",
+                    color: sharePermission === "EDIT" ? "#4ade80" : "#94a3b8",
+                  }}
+                >
+                  ✏️ Can Edit
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  style={{ background: "#334155", color: "#e2e8f0", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={!shareEmail.trim()}
+                  onClick={() => {
+                    setShowShareModal(false);
+                    shareCallbackRef.current?.(shareEmail.trim(), sharePermission);
+                  }}
+                  style={{
+                    background: shareEmail.trim() ? "linear-gradient(135deg, #2563eb, #7c3aed)" : "#334155",
+                    color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: shareEmail.trim() ? "pointer" : "not-allowed",
+                    fontWeight: 600, opacity: shareEmail.trim() ? 1 : 0.5,
+                  }}
+                >
+                  🔗 Share [{sharePermission}]
                 </button>
               </div>
             </div>
