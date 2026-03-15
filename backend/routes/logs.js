@@ -30,7 +30,13 @@ router.get("/file/:fileId", auth, async (req, res) => {
       }
     }
 
-    const logs = await ActivityLog.find({ fileId: req.params.fileId })
+    // Owner sees ALL logs; recipients see only their own actions
+    const query = { fileId: req.params.fileId };
+    if (!isOwner) {
+      query.userId = userId;
+    }
+
+    const logs = await ActivityLog.find(query)
       .populate("userId", "name email")
       .sort({ createdAt: -1 });
     res.json(logs);
