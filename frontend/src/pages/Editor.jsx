@@ -217,6 +217,8 @@ export default function Editor() {
   const sharedFileIdRef = useRef(sharedFileId);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versionHistory, setVersionHistory] = useState(null);
+  const [changeSummary, setChangeSummary] = useState(null);
+  const [showChangeSummary, setShowChangeSummary] = useState(false);
 
   /* ---------- LAYOUT & VIEW SETTINGS ---------- */
   const [pageSettings, setPageSettings] = useState({
@@ -506,8 +508,14 @@ export default function Editor() {
       try {
         showStatus("Creating new version of shared document…");
         const res = await api.post(`/api/doc/edit/${fileId}`, { content });
-        const { version, cid, accessList } = res.data;
-        showStatus(`✅ Version ${version} created! CID: ${cid?.substring(0, 12)}… | Access: ${(accessList || []).join(", ")}`);
+        const { version, cid, accessList, changeSummary: cs } = res.data;
+        showStatus(`✅ Version ${version} created! CID: ${cid?.substring(0, 12)}…`);
+
+        // Show change summary modal so user can review and optionally share
+        if (cs) {
+          setChangeSummary({ ...cs, version, cid, filename: res.data.filename || docName });
+          setShowChangeSummary(true);
+        }
       } catch (err) {
         console.error("Shared edit save error:", err);
         showStatus(err.response?.data?.error || "Failed to save edits");
@@ -1320,6 +1328,87 @@ const shareDoc = async () => {
           </div>
         </div>
       )}
+
+      {/* CHANGE SUMMARY MODAL */}
+      {showChangeSummary && changeSummary && (
+        <div style={versionModalStyles.overlay} onClick={() => setShowChangeSummary(false)}>
+          <div style={{ ...versionModalStyles.modal, width: 480 }} onClick={e => e.stopPropagation()}>
+            <div style={versionModalStyles.header}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📊 Changes Saved — Version {changeSummary.version}</h3>
+              <button onClick={() => setShowChangeSummary(false)} style={versionModalStyles.closeBtn}>✕</button>
+            </div>
+            <div style={versionModalStyles.body}>
+              <div style={{ marginBottom: 14, fontSize: 13, color: "#cbd5e1" }}>
+                Your edits to <strong style={{ color: "#60a5fa" }}>{changeSummary.filename || docName}</strong> have been saved as a new version on IPFS.
+              </div>
+
+              {/* Change stats */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                <div style={csStatCard}>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#4ade80" }}>+{changeSummary.addedWords}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Words Added</div>
+                </div>
+                <div style={csStatCard}>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#f87171" }}>-{changeSummary.removedWords}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Words Removed</div>
+                </div>
+                <div style={csStatCard}>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: "#fbbf24" }}>{changeSummary.changePercent}%</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Content Changed</div>
+                </div>
+                <div style={csStatCard}>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: "#60a5fa" }}>{changeSummary.newWordCount}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Total Words</div>
+                </div>
+              </div>
+
+              {/* Detail line */}
+              <div style={{ background: "#0f172a", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#94a3b8", border: "1px solid #334155" }}>
+                {changeSummary.summary}
+              </div>
+
+              {/* CID info */}
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16 }}>
+                New CID: <span style={{ color: "#60a5fa" }}>{changeSummary.cid?.substring(0, 24)}…</span>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setShowChangeSummary(false)}
+                  style={{ background: "#334155", color: "#e2e8f0", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer" }}
+                >
+                  Close
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowChangeSummary(false);
+                    const email = prompt("Share this version with (enter email):");
+                    if (!email) return;
+                    const perm = prompt("Permission — type VIEW or EDIT:", "VIEW");
+                    if (!perm) return;
+                    const permission = perm.trim().toUpperCase() === "EDIT" ? "EDIT" : "VIEW";
+                    try {
+                      showStatus("Sharing document…");
+                      await api.post("/api/share", {
+                        fileId: sharedFileIdRef.current,
+                        recipientEmail: email.toLowerCase(),
+                        permission,
+                      });
+                      showStatus(`🔗 Shared v${changeSummary.version} with ${email} [${permission}]`);
+                    } catch (err) {
+                      showStatus(err.response?.data?.error || "Share failed");
+                    }
+                  }}
+                  style={{ background: "linear-gradient(135deg, #2563eb, #7c3aed)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
+                >
+                  🔗 Share This Version
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1531,6 +1620,14 @@ const styles = {
     color: "#2563eb",
     fontWeight: 600,
   },
+};
+
+const csStatCard = {
+  background: "#0f172a",
+  borderRadius: 8,
+  padding: "12px 14px",
+  textAlign: "center",
+  border: "1px solid #334155",
 };
 
 const versionModalStyles = {

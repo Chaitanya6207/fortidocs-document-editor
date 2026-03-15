@@ -52,6 +52,60 @@ async function buildEncryptedKeysForACL(file, newAesKey) {
 }
 
 /**
+ * Helper: strip HTML tags to get plain text for comparison.
+ */
+function stripHtml(html) {
+  return (html || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Helper: compute a simple change summary between old and new plain text.
+ * Returns { addedWords, removedWords, addedLines, removedLines, changePercent, summary }
+ */
+function computeChangeSummary(oldHtml, newHtml) {
+  const oldText = stripHtml(oldHtml);
+  const newText = stripHtml(newHtml);
+
+  const oldWords = oldText.split(/\s+/).filter(Boolean);
+  const newWords = newText.split(/\s+/).filter(Boolean);
+
+  const oldLines = oldText.split(/[.!?\n]+/).filter(l => l.trim());
+  const newLines = newText.split(/[.!?\n]+/).filter(l => l.trim());
+
+  // Simple word-level diff using Set comparison
+  const oldSet = new Set(oldWords);
+  const newSet = new Set(newWords);
+
+  const addedWords = newWords.filter(w => !oldSet.has(w)).length;
+  const removedWords = oldWords.filter(w => !newSet.has(w)).length;
+
+  const totalWords = Math.max(oldWords.length, newWords.length, 1);
+  const changePercent = Math.round(((addedWords + removedWords) / totalWords) * 100);
+
+  const summary = [];
+  if (addedWords > 0) summary.push(`+${addedWords} words added`);
+  if (removedWords > 0) summary.push(`-${removedWords} words removed`);
+  if (newWords.length !== oldWords.length) {
+    summary.push(`Word count: ${oldWords.length} → ${newWords.length}`);
+  }
+  if (newLines.length !== oldLines.length) {
+    summary.push(`Sentences: ${oldLines.length} → ${newLines.length}`);
+  }
+  summary.push(`~${changePercent}% changed`);
+
+  return {
+    addedWords,
+    removedWords,
+    oldWordCount: oldWords.length,
+    newWordCount: newWords.length,
+    oldSentenceCount: oldLines.length,
+    newSentenceCount: newLines.length,
+    changePercent,
+    summary: summary.join(" | "),
+  };
+}
+
+/**
  * Helper: fetch content from IPFS, trying multiple gateways.
  */
 async function fetchFromIPFS(cid) {
@@ -360,6 +414,36 @@ router.post("/edit/:fileId", auth, async (req, res) => {
     const previousCid = file.cid;
     const newVersion = (file.currentVersion || 1) + 1;
 
+    // === FETCH PREVIOUS CONTENT FOR CHANGE DETECTION ===
+    let changeSummary = null;
+    try {
+      const prevIpfsData = await fetchFromIPFS(previousCid);
+      if (prevIpfsData) {
+        let oldHtml = "";
+        if (file.encrypted && prevIpfsData.type === "encrypted-document" && prevIpfsData.encryptedContent) {
+          // Decrypt previous content to compare
+          const latestVer = await DocumentVersion.findOne({ fileId: file._id }).sort({ version: -1 });
+          if (latestVer) {
+            const editorKey = latestVer.encryptedKeys.find(
+              k => k.userId.toString() === userId || k.email === userEmail
+            );
+            if (editorKey) {
+              const rawKey = serverDecrypt(editorKey.serverEncryptedKey);
+              const bytes = CryptoJS.AES.decrypt(prevIpfsData.encryptedContent, rawKey);
+              oldHtml = bytes.toString(CryptoJS.enc.Utf8);
+            }
+          }
+        } else {
+          oldHtml = prevIpfsData.content || (typeof prevIpfsData === "string" ? prevIpfsData : "");
+        }
+        if (oldHtml) {
+          changeSummary = computeChangeSummary(oldHtml, content);
+        }
+      }
+    } catch (diffErr) {
+      console.warn("Change detection failed (non-blocking):", diffErr.message);
+    }
+
     // Encrypt content with the new AES key
     let ipfsPayload;
     if (file.encrypted) {
@@ -465,6 +549,7 @@ router.post("/edit/:fileId", auth, async (req, res) => {
       version: newVersion,
       previousCid,
       accessList: file.accessList,
+      changeSummary,
     });
   } catch (err) {
     console.error("EDIT ERROR:", err);
