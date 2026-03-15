@@ -389,11 +389,24 @@ export default function Editor() {
     return { hL, hC, hR, fL, fC, fR };
   }, [headerFooter]);
 
-  // Switch to a page card and scroll to it
+  // Switch to a page card and position cursor there
   const switchToPage = useCallback((pageIndex) => {
     setActivePage(pageIndex);
     setCurrentPage(pageIndex + 1);
-    scrollToPage(pageIndex + 1);
+    // After React re-render, focus Quill at the start of that page's content
+    setTimeout(() => {
+      const ed = quillRef.current?.getEditor();
+      if (!ed || !contentHeightRef.current) return;
+      const targetY = pageIndex * contentHeightRef.current + 10;
+      // Find the Quill index at approximately that Y position
+      const idx = ed.getSelection()?.index;
+      if (idx == null) {
+        // Try to set cursor to the area visible on this page
+        const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
+        ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
+      }
+      ed.focus();
+    }, 50);
   }, []);
 
   /* ---------- SCROLL TO PAGE ---------- */
@@ -849,8 +862,8 @@ const shareDoc = async () => {
             overflow: visible !important;
           }
         }
-        /* ---- Page cards & Continuous Editor ---- */
-        .doc-page-card {
+        /* ---- Page cards & Floating Editor ---- */
+        .doc-page-card, .floating-editor-viewport {
           position: relative;
           box-sizing: border-box;
           border-radius: 4px;
@@ -858,11 +871,11 @@ const shareDoc = async () => {
           flex-direction: column;
           overflow: hidden;
         }
-        .continuous-editor-layer .ql-container {
+        .doc-page-card .ql-container, .floating-editor-viewport .ql-container {
           border: none !important;
           font-size: inherit;
         }
-        .continuous-editor-layer .ql-editor {
+        .doc-page-card .ql-editor, .floating-editor-viewport .ql-editor {
           overflow: visible !important;
           height: auto !important;
           padding: 0 !important;
@@ -1086,8 +1099,6 @@ const shareDoc = async () => {
                 {Array.from({ length: totalPages }, (_, i) => {
                   const pageNum = i + 1;
                   const isActive = currentPage === pageNum;
-                  const contentH = contentHeightRef.current || calcContentHeightPerPage();
-                  const thumbScale = 104 / (parseFloat(pageSettings.orientation === "landscape" ? pageSettings.height : pageSettings.width) * 3.78 || 793);
                   return (
                     <button
                       key={pageNum}
@@ -1101,24 +1112,46 @@ const shareDoc = async () => {
                       <div style={styles.pageThumbnailInner}>
                         <div
                           className="ql-snow"
-                          style={{
-                            ...styles.pageThumbnailContent,
-                            transform: `scale(${thumbScale})`,
-                            transformOrigin: "top left",
-                            width: `${100 / thumbScale}%`,
-                            height: `${100 / thumbScale}%`,
-                          }}
+                          style={styles.pageThumbnailContent}
                         >
                           <div
                             className="ql-editor"
                             style={{
-                              padding: `0 ${getMarginPx()}px`,
+                              fontSize: "1.6px",
+                              lineHeight: "1.4",
+                              padding: "3px",
                               overflow: "hidden",
                               pointerEvents: "none",
-                              height: contentH,
-                              marginTop: -(i * contentH),
+                              maxHeight: "100%",
                             }}
-                            dangerouslySetInnerHTML={{ __html: content }}
+                            dangerouslySetInnerHTML={{
+                              __html: (() => {
+                                if (!content) return "";
+                                const div = document.createElement("div");
+                                div.innerHTML = content;
+                                const allNodes = div.querySelectorAll("*");
+                                // Rough split: each page ~ equal portion of content
+                                const totalChars = div.textContent.length || 1;
+                                const charsPerPage = Math.ceil(totalChars / totalPages);
+                                const startChar = (pageNum - 1) * charsPerPage;
+                                const endChar = pageNum * charsPerPage;
+                                // Simple: return full HTML for page 1 thumbnail, sliced for others
+                                if (totalPages === 1) return content;
+                                // Extract approximate slice for this page
+                                let charCount = 0;
+                                let result = "";
+                                for (const child of div.childNodes) {
+                                  const nodeText = child.textContent || "";
+                                  const nodeEnd = charCount + nodeText.length;
+                                  if (nodeEnd > startChar && charCount < endChar) {
+                                    result += child.outerHTML || child.textContent;
+                                  }
+                                  charCount = nodeEnd;
+                                  if (charCount >= endChar) break;
+                                }
+                                return result;
+                              })(),
+                            }}
                           />
                         </div>
                       </div>
@@ -1167,7 +1200,7 @@ const shareDoc = async () => {
             </div>
           )}
 
-          {/* ---- CONTINUOUS EDITOR WITH PAGE CARD VISUALS ---- */}
+          {/* ---- SINGLE FLOATING EDITOR & PAGE CARDS ---- */}
           {(() => {
             const pageW = viewSettings.viewMode === "web" ? "100%"
               : pageSettings.orientation === "landscape"
@@ -1190,128 +1223,129 @@ const shareDoc = async () => {
             }
 
             return (
-              <div
-                style={{
-                  transform: `scale(${viewSettings.zoom / 100})`,
+              <div 
+                style={{ 
+                  transform: `scale(${viewSettings.zoom / 100})`, 
                   transformOrigin: "top center",
                   width: pageW,
                   position: "relative",
+                  minHeight: pageH * totalPages + PAGE_GAP * (totalPages - 1),
                 }}
               >
-                {/* Page card backgrounds (visual only — no content mirrors) */}
-                <div style={{ position: "absolute", top: 0, left: 0, right: 0, pointerEvents: "none", zIndex: 0 }}>
-                  {Array.from({ length: Math.max(1, totalPages) }, (_, i) => {
-                    const pageNum = i + 1;
-                    const hf = hfEnabled ? resolveHFForPage(pageNum) : null;
-                    const hasHeader = hf && (hf.hL || hf.hC || hf.hR);
-                    const hasFooter = hf && (hf.fL || hf.fC || hf.fR);
+                {/* 1. RENDER PAGE BACKGROUNDS & MIRRORS */}
+                {Array.from({ length: Math.max(1, totalPages) }, (_, i) => {
+                  const pageNum = i + 1;
+                  const isActive = i === activePage;
+                  const contentOffset = i * contentH;
+                  const hf = hfEnabled ? resolveHFForPage(pageNum) : null;
+                  const hasHeader = hf && (hf.hL || hf.hC || hf.hR);
+                  const hasFooter = hf && (hf.fL || hf.fC || hf.fR);
 
-                    return (
-                      <React.Fragment key={`page-bg-${pageNum}`}>
-                        {i > 0 && viewSettings.viewMode !== "web" && (
-                          <div className="page-card-gap" style={{
-                            height: PAGE_GAP,
-                            background: viewSettings.darkMode ? '#1e293b' : 'transparent',
+                  return (
+                    <React.Fragment key={`page-bg-${pageNum}`}>
+                      {i > 0 && viewSettings.viewMode !== "web" && (
+                        <div className="page-card-gap" style={{
+                          height: PAGE_GAP,
+                          background: viewSettings.darkMode ? '#1e293b' : 'transparent',
+                        }}>
+                          <span style={{
+                            fontSize: 9, color: '#94a3b8', fontWeight: 600,
+                            letterSpacing: 1, textTransform: 'uppercase',
+                            background: '#d1d5db', padding: '2px 16px', borderRadius: 10,
+                          }}>Page {pageNum}</span>
+                        </div>
+                      )}
+                      <div
+                        className="doc-page-card"
+                        style={{
+                          width: "100%",
+                          height: viewSettings.viewMode === "web" ? 'auto' : pageH,
+                          backgroundColor: pageSettings.pageColor,
+                          border: pageSettings.pageBorder,
+                          boxShadow: viewSettings.viewMode === "focus" ? "none" : "0 2px 16px rgba(0,0,0,0.08)",
+                          ...gridBg,
+                        }}
+                      >
+                        <div style={{ height: marginPx, flexShrink: 0 }} />
+                        
+                        {hasHeader && (
+                          <div className="page-hf-strip" style={{
+                            height: hfZone, padding: `0 ${marginPx}px`,
+                            borderBottom: '1px solid #e2e8f0',
                           }}>
-                            <span style={{
-                              fontSize: 9, color: '#94a3b8', fontWeight: 600,
-                              letterSpacing: 1, textTransform: 'uppercase',
-                              background: '#d1d5db', padding: '2px 16px', borderRadius: 10,
-                            }}>Page {pageNum}</span>
+                            <span>{hf.hL}</span><span>{hf.hC}</span><span>{hf.hR}</span>
                           </div>
                         )}
+                        
+                        {/* Page Mirror Viewport */}
                         <div
-                          className="doc-page-card"
+                          className="page-content-viewport"
                           style={{
-                            width: "100%",
-                            height: viewSettings.viewMode === "web" ? "auto" : pageH,
-                            minHeight: viewSettings.viewMode === "web" ? contentH : undefined,
-                            backgroundColor: pageSettings.pageColor,
-                            border: pageSettings.pageBorder,
-                            boxShadow: viewSettings.viewMode === "focus" ? "none" : "0 2px 16px rgba(0,0,0,0.08)",
-                            ...gridBg,
+                            height: contentH,
+                            padding: `0 ${marginPx}px`,
+                            visibility: isActive ? "hidden" : "visible",
                           }}
+                          onClick={() => { if (!isActive) switchToPage(i); }}
                         >
-                          {/* Top margin */}
-                          <div style={{ height: marginPx }} />
-                          {hasHeader && (
-                            <div className="page-hf-strip" style={{
-                              height: hfZone, padding: `0 ${marginPx}px`,
-                              borderBottom: '1px solid #e2e8f0',
-                            }}>
-                              <span>{hf.hL}</span><span>{hf.hC}</span><span>{hf.hR}</span>
+                          <div
+                            className="page-mirror-content"
+                            style={{ marginTop: -contentOffset }}
+                          >
+                            <div className="ql-snow" style={{ background: 'transparent' }}>
+                              <div
+                                className="ql-editor"
+                                dangerouslySetInnerHTML={{ __html: content }}
+                              />
                             </div>
-                          )}
-                          {/* Content area placeholder */}
-                          <div style={{ height: contentH }} />
-                          {hasFooter && (
-                            <div className="page-hf-strip" style={{
-                              height: hfZone, padding: `0 ${marginPx}px`,
-                              borderTop: '1px solid #e2e8f0',
-                            }}>
-                              <span>{hf.fL}</span><span>{hf.fC}</span><span>{hf.fR}</span>
-                            </div>
-                          )}
-                          {/* Bottom margin */}
-                          <div style={{ height: marginPx }} />
+                          </div>
                         </div>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
 
-                {/* Single continuous Quill editor overlaid on page cards */}
-                <div
-                  className="continuous-editor-layer"
+                        {hasFooter && (
+                          <div className="page-hf-strip" style={{
+                            height: hfZone, padding: `0 ${marginPx}px`,
+                            borderTop: '1px solid #e2e8f0',
+                          }}>
+                            <span>{hf.fL}</span><span>{hf.fC}</span><span>{hf.fR}</span>
+                          </div>
+                        )}
+                        
+                        <div style={{ height: marginPx, flexShrink: 0 }} />
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* 2. SINGLE FLOATING EDITOR (Overlays Active Page) */}
+                <div 
+                  className="floating-editor-viewport"
                   style={{
-                    position: "relative",
-                    zIndex: 1,
+                    position: "absolute",
+                    top: activePage * (pageH + PAGE_GAP) + marginPx + hfZone, // Physical jump coordinates
+                    left: 0,
+                    right: 0,
+                    height: contentH,
+                    padding: `0 ${marginPx}px`,
+                    overflow: "hidden", // Clips editor visually to active page boundaries
+                    zIndex: 10,
+                    boxSizing: "border-box",
+                  }}
+                  onClick={() => {
+                    const editor = quillRef.current?.getEditor();
+                    if (editor && !editor.hasFocus()) editor.focus();
                   }}
                 >
-                  {Array.from({ length: Math.max(1, totalPages) }, (_, i) => {
-                    const isLast = i === totalPages - 1;
-                    return (
-                      <React.Fragment key={`editor-spacer-${i}`}>
-                        {i > 0 && viewSettings.viewMode !== "web" && (
-                          <div style={{ height: PAGE_GAP, pointerEvents: "none" }} />
-                        )}
-                        {/* Top margin + header zone spacer */}
-                        <div style={{ height: marginPx + hfZone, pointerEvents: "none" }} />
-                        {/* Content slice — first page holds the editor, others are spacers */}
-                        {i === 0 ? (
-                          <div
-                            style={{
-                              padding: `0 ${marginPx}px`,
-                              minHeight: contentH,
-                            }}
-                            onClick={() => {
-                              const ed = quillRef.current?.getEditor();
-                              if (ed && !ed.hasFocus()) ed.focus();
-                            }}
-                          >
-                            <ReactQuill
-                              ref={quillRef}
-                              value={content}
-                              onChange={handleContentChange}
-                              scrollingContainer="#quill-scroll-container"
-                              modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
-                              style={{ background: "transparent" }}
-                            />
-                          </div>
-                        ) : (
-                          <div style={{
-                            height: isLast ? undefined : contentH,
-                            minHeight: isLast ? 0 : contentH,
-                            padding: `0 ${marginPx}px`,
-                            pointerEvents: "none",
-                          }} />
-                        )}
-                        {/* Bottom margin + footer zone spacer */}
-                        <div style={{ height: marginPx + hfZone, pointerEvents: "none" }} />
-                      </React.Fragment>
-                    );
-                  })}
+                  <div style={{ marginTop: -activePage * contentH }}>
+                    <ReactQuill
+                      ref={quillRef}
+                      value={content}
+                      onChange={handleContentChange}
+                      scrollingContainer="#quill-scroll-container"
+                      modules={{ toolbar: false, imageResize: { parchment: Parchment } }}
+                      style={{ background: 'transparent' }}
+                    />
+                  </div>
                 </div>
+
               </div>
             );
           })()}
