@@ -753,93 +753,85 @@ export default function Editor() {
 
   const printDoc = () => window.print();
 
-const shareDoc = async () => {
-  const recipientEmail = prompt("Enter receiver email");
-  if (!recipientEmail) return;
-
-  const permChoice = prompt("Permission — type VIEW or EDIT:", "VIEW");
-  if (!permChoice) return;
-  const permission = permChoice.trim().toUpperCase() === "EDIT" ? "EDIT" : "VIEW";
-
+const shareDoc = () => {
   if (!content || content === "<p><br></p>") {
     showStatus("Cannot share an empty document");
     return;
   }
 
-  // If user has unsaved edits, ask whether to share modified or last-saved version
-  let shareModified = false;
-  if (isDirtyRef.current) {
-    const choice = window.confirm(
-      "You have modified this file.\n\n" +
-      "OK → Share the modified version (will save & encrypt your changes first)\n" +
-      "Cancel → Share the last saved version (without your recent edits)"
-    );
-    shareModified = choice;
-    if (shareModified) {
+  // Set up the callback that runs when the share modal is confirmed
+  shareCallbackRef.current = async (recipientEmail, permission) => {
+    // If user has unsaved edits, save first
+    if (isDirtyRef.current) {
       showStatus("Saving your changes before sharing…");
       await saveDoc();
     }
-  }
 
-  try {
-    // --- SHARING A RECEIVED/SHARED FILE (re-share) ---
-    const isShared = sharedEditRef.current;
-    const existingFileId = sharedFileIdRef.current;
-    if (isShared && existingFileId) {
-      showStatus("Sharing document…");
-      await api.post("/api/share", {
-        fileId: existingFileId,
-        recipientEmail: recipientEmail.toLowerCase(),
-        permission,
-      });
-      showStatus(`🔗 Shared with ${recipientEmail} [${permission}]`);
-      return;
-    }
-
-    // --- SHARING A NEW/OWN FILE ---
-    let name = docName;
-    if (!name) {
-      name = askForName();
-      if (!name) {
-        showStatus("Share cancelled — no filename provided");
+    try {
+      // --- SHARING A RECEIVED/SHARED FILE (re-share) ---
+      const isShared = sharedEditRef.current;
+      const existingFileId = sharedFileIdRef.current;
+      if (isShared && existingFileId) {
+        showStatus("Sharing document…");
+        await api.post("/api/share", {
+          fileId: existingFileId,
+          recipientEmail: recipientEmail.toLowerCase(),
+          permission,
+        });
+        showStatus(`🔗 Shared with ${recipientEmail} [${permission}]`);
         return;
       }
+
+      // --- SHARING A NEW/OWN FILE ---
+      let name = docName;
+      if (!name) {
+        name = askForName();
+        if (!name) {
+          showStatus("Share cancelled — no filename provided");
+          return;
+        }
+      }
+
+      showStatus("Encrypting, saving & sharing…");
+
+      // Ensure AES key exists
+      let currentKey = aesKey;
+      if (!currentKey) {
+        currentKey = generateAESKey();
+        setAesKey(currentKey);
+      }
+
+      // 1. Encrypt content with AES key
+      const encryptedContent = encryptAES(content, currentKey);
+
+      // 2. Save encrypted document to IPFS (server stores server-encrypted AES key)
+      const saveRes = await api.post("/api/doc/save", {
+        content: encryptedContent,
+        filename: name,
+        target: "cloud",
+        aesKey: currentKey,
+      });
+      const file = saveRes.data;
+
+      // 3. Share — server stores a server-encrypted key for the recipient
+      await api.post("/api/share", {
+        fileId: file._id,
+        recipientEmail: recipientEmail.toLowerCase(),
+        aesKey: currentKey,
+        permission,
+      });
+
+      showStatus(`🔒 Encrypted & shared with ${recipientEmail} [${permission}]`);
+    } catch (err) {
+      console.error("Share error:", err.response?.data || err);
+      showStatus(err.response?.data?.error || "Share failed");
     }
+  };
 
-    showStatus("Encrypting, saving & sharing…");
-
-    // Ensure AES key exists
-    let currentKey = aesKey;
-    if (!currentKey) {
-      currentKey = generateAESKey();
-      setAesKey(currentKey);
-    }
-
-    // 1. Encrypt content with AES key
-    const encryptedContent = encryptAES(content, currentKey);
-
-    // 2. Save encrypted document to IPFS (server stores server-encrypted AES key)
-    const saveRes = await api.post("/api/doc/save", {
-      content: encryptedContent,
-      filename: name,
-      target: "cloud",
-      aesKey: currentKey,
-    });
-    const file = saveRes.data;
-
-    // 3. Share — server stores a server-encrypted key for the recipient
-    await api.post("/api/share", {
-      fileId: file._id,
-      recipientEmail: recipientEmail.toLowerCase(),
-      aesKey: currentKey,
-      permission,
-    });
-
-    showStatus(`🔒 Encrypted & shared with ${recipientEmail} [${permission}]`);
-  } catch (err) {
-    console.error("Share error:", err.response?.data || err);
-    showStatus(err.response?.data?.error || "Share failed");
-  }
+  // Open the share modal
+  setShareEmail("");
+  setSharePermission("VIEW");
+  setShowShareModal(true);
 };
 
 
