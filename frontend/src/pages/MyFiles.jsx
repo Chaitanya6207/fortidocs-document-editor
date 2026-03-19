@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 
 const ACTION_LABELS = {
@@ -22,6 +23,7 @@ export default function MyFiles() {
   const [expandedFile, setExpandedFile] = useState(null);
   const [logs, setLogs] = useState({});
   const [logsLoading, setLogsLoading] = useState({});
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadFiles();
@@ -258,9 +260,32 @@ export default function MyFiles() {
                                 >
                                   {a.icon} {a.label}
                                 </span>
-                                <span style={styles.timeAgo}>
-                                  {timeAgo(log.createdAt)}
-                                </span>
+                                <div style={styles.logActions}>
+                                  <button
+                                    style={styles.logViewBtn}
+                                    onClick={() => {
+                                      const cidMatch = log.details?.match(/New CID:\s*(\S+)/);
+                                      const useCid = cidMatch ? cidMatch[1].replace(/\.+$/, '') : file.cid;
+                                      const url = `/viewer?fileId=${file._id}&filename=${encodeURIComponent(file.filename)}&cid=${encodeURIComponent(useCid)}&permission=VIEW`;
+                                      navigate(url);
+                                    }}
+                                    title="View this version"
+                                  >
+                                    👁 View
+                                  </button>
+                                  <button
+                                    style={styles.logEditBtn}
+                                    onClick={() => {
+                                      navigate(`/editor?sharedFileId=${file._id}&filename=${encodeURIComponent(file.filename)}`);
+                                    }}
+                                    title="Edit this file"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  <span style={styles.timeAgo}>
+                                    {timeAgo(log.createdAt)}
+                                  </span>
+                                </div>
                               </div>
                               {log.details && (
                                 <div style={styles.logDetails}>{log.details}</div>
@@ -527,5 +552,32 @@ const styles = {
     color: "#94a3b8",
     marginTop: 2,
     fontStyle: "italic",
+  },
+  logActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  logViewBtn: {
+    padding: "2px 8px",
+    border: "1px solid #bfdbfe",
+    borderRadius: 5,
+    background: "#eff6ff",
+    color: "#2563eb",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  logEditBtn: {
+    padding: "2px 8px",
+    border: "1px solid #bbf7d0",
+    borderRadius: 5,
+    background: "#f0fdf4",
+    color: "#16a34a",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 };
