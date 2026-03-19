@@ -410,56 +410,61 @@ export default function Editor() {
     const click = lastClickRef.current;
     lastClickRef.current = null; // consume it
 
-    // --- Step 1: Set cursor ---
-    let cursorSet = false;
-    if (click) {
-      // Use native caret‑hit‑testing for pixel‑perfect placement
-      let range = null;
-      if (document.caretRangeFromPoint) {
-        range = document.caretRangeFromPoint(click.x, click.y);
-      } else if (document.caretPositionFromPoint) {
-        const pos = document.caretPositionFromPoint(click.x, click.y);
-        if (pos) {
-          range = document.createRange();
-          range.setStart(pos.offsetNode, pos.offset);
+    // Give the DOM a moment to stabilize after relocating the editor element
+    const timeoutId = setTimeout(() => {
+      // --- Step 1: Set cursor ---
+      let cursorSet = false;
+      if (click) {
+        // Use native caret‑hit‑testing for pixel‑perfect placement
+        let range = null;
+        if (document.caretRangeFromPoint) {
+          range = document.caretRangeFromPoint(click.x, click.y);
+        } else if (document.caretPositionFromPoint) {
+          const pos = document.caretPositionFromPoint(click.x, click.y);
+          if (pos) {
+            range = document.createRange();
+            range.setStart(pos.offsetNode, pos.offset);
+          }
+        }
+        if (range && range.startContainer) {
+          try {
+            const blot = Quill.find(
+              range.startContainer.nodeType === 3
+                ? range.startContainer.parentNode
+                : range.startContainer
+            );
+            if (blot) {
+              const quillIndex = ed.getIndex(blot) + range.startOffset;
+              if (typeof quillIndex === 'number' && quillIndex >= 0) {
+                ed.setSelection(quillIndex, 0, 'silent');
+                cursorSet = true;
+              }
+            }
+          } catch (_) { /* fall through */ }
         }
       }
-      if (range && range.startContainer) {
-        try {
-          const blot = Quill.find(
-            range.startContainer.nodeType === 3
-              ? range.startContainer.parentNode
-              : range.startContainer
-          );
-          if (blot) {
-            const quillIndex = ed.getIndex(blot) + range.startOffset;
-            if (typeof quillIndex === 'number' && quillIndex >= 0) {
-              ed.setSelection(quillIndex, 0, 'silent');
-              cursorSet = true;
-            }
-          }
-        } catch (_) { /* fall through */ }
+
+      if (!cursorSet) {
+        // Fallback: set cursor to approximate start of the target page
+        const targetY = activePage * contentHeightRef.current + 10;
+        const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
+        ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
       }
-    }
 
-    if (!cursorSet) {
-      // Fallback: set cursor to approximate start of the target page
-      const targetY = activePage * contentHeightRef.current + 10;
-      const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
-      ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
-    }
+      // --- Step 2: Focus WITHOUT letting Quill scroll the container ---
+      if (wrapEl) {
+        const savedScrollTop = wrapEl.scrollTop;
+        ed.focus();
+        wrapEl.scrollTop = savedScrollTop;
+        requestAnimationFrame(() => {
+          if (wrapEl) wrapEl.scrollTop = savedScrollTop;
+        });
+      } else {
+        ed.focus();
+      }
+    }, 10);
 
-    // --- Step 2: Focus WITHOUT letting Quill scroll the container ---
-    if (wrapEl) {
-      const savedScrollTop = wrapEl.scrollTop;
-      ed.focus();
-      wrapEl.scrollTop = savedScrollTop;
-      requestAnimationFrame(() => {
-        if (wrapEl) wrapEl.scrollTop = savedScrollTop;
-      });
-    } else {
-      ed.focus();
-    }
+    return () => clearTimeout(timeoutId);
   }, [activePage, totalPages]); // Re-run when page changes
 
   /* ---------- SCROLL TO PAGE ---------- */
@@ -920,7 +925,8 @@ const shareDoc = () => {
           border: none !important;
           font-size: inherit;
         }
-        .doc-page-card .ql-editor, .floating-editor-viewport .ql-editor {
+        /* Universal override to ensure layout consistency across floating editor, mirrors, and thumbnails */
+        .ql-editor {
           overflow: visible !important;
           height: auto !important;
           padding: 0 !important;
@@ -931,12 +937,8 @@ const shareDoc = () => {
           position: relative;
           flex-shrink: 0;
         }
-        /* Mirror (non-active) page content */
         .page-mirror-content {
           cursor: pointer;
-        }
-        .page-mirror-content .ql-editor {
-          padding: 0 !important;
         }
         /* Header/footer strips */
         .page-hf-strip {
@@ -1426,6 +1428,8 @@ const shareDoc = () => {
                             : range.startContainer)
                         ) + range.startOffset;
                         if (typeof quillIndex === 'number' && quillIndex >= 0) {
+                          // Prevent browser selection from overriding our custom placement
+                          e.preventDefault();
                           ed.setSelection(quillIndex, 0, 'user');
                           ed.focus();
                           return;
