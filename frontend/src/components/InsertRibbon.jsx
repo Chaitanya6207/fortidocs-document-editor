@@ -4,6 +4,8 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
   const [showSymbols, setShowSymbols] = useState(false);
   const [showShapes, setShowShapes] = useState(false);
   const [showHeaderFooter, setShowHeaderFooter] = useState(false);
+  const [showTableGrid, setShowTableGrid] = useState(false);
+  const [hoveredGrid, setHoveredGrid] = useState({ r: 0, c: 0 });
 
   if (!editor) return null;
 
@@ -57,29 +59,27 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
   };
 
   /* ---------- TABLE ---------- */
-  const insertTable = () => {
+  const insertTable = (rows, cols) => {
     const range = getRange();
-    const rows = prompt("Number of rows?", "3");
-    const cols = prompt("Number of columns?", "3");
-    if (!rows || !cols) return;
     const r = parseInt(rows), c = parseInt(cols);
     if (isNaN(r) || isNaN(c) || r < 1 || c < 1) return;
 
-    let html = `<table><thead><tr>`;
+    let html = `<table style="width:100%; border-collapse:collapse; border:1px solid #cbd5e1;"><thead><tr>`;
     for (let j = 0; j < c; j++) {
-      html += `<th>Header ${j + 1}</th>`;
+      html += `<th style="border:1px solid #cbd5e1; padding:8px; background:#f8fafc;">Header ${j + 1}</th>`;
     }
     html += `</tr></thead><tbody>`;
     for (let i = 0; i < r - 1; i++) {
       html += "<tr>";
       for (let j = 0; j < c; j++) {
-        html += `<td>Cell</td>`;
+        html += `<td style="border:1px solid #cbd5e1; padding:8px;">Cell</td>`;
       }
       html += "</tr>";
     }
     html += "</tbody></table>";
     editor.insertEmbed(range.index, "tableEmbed", html, "user");
     editor.setSelection(range.index + 1);
+    setShowTableGrid(false);
   };
 
   /* ---------- LINK ---------- */
@@ -200,7 +200,12 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
     {
       title: "Tables",
       items: [
-        { label: "Table", icon: "📊", fn: insertTable },
+        { 
+          label: "Table", 
+          icon: "📊", 
+          fn: () => { setShowTableGrid(!showTableGrid); setShowShapes(false); setShowSymbols(false); setShowHeaderFooter(false); },
+          dropdown: true 
+        },
       ],
     },
     {
@@ -211,7 +216,7 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
         {
           label: "Shapes",
           icon: "⬡",
-          fn: () => { setShowShapes(!showShapes); setShowSymbols(false); setShowHeaderFooter(false); },
+          fn: () => { setShowShapes(!showShapes); setShowSymbols(false); setShowHeaderFooter(false); setShowTableGrid(false); },
           dropdown: true,
         },
       ],
@@ -222,7 +227,7 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
         {
           label: "Header & Footer",
           icon: "📝",
-          fn: () => { setShowHeaderFooter(!showHeaderFooter); setShowSymbols(false); setShowShapes(false); },
+          fn: () => { setShowHeaderFooter(!showHeaderFooter); setShowSymbols(false); setShowShapes(false); setShowTableGrid(false); },
           dropdown: true,
         },
       ],
@@ -251,7 +256,7 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
         {
           label: "Symbol",
           icon: "Ω",
-          fn: () => { setShowSymbols(!showSymbols); setShowShapes(false); setShowHeaderFooter(false); },
+          fn: () => { setShowSymbols(!showSymbols); setShowShapes(false); setShowHeaderFooter(false); setShowTableGrid(false); },
           dropdown: true,
         },
       ],
@@ -315,6 +320,39 @@ export default function InsertRibbon({ editor, headerFooter, setHeaderFooter }) 
                 {s}
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Table Selection Grid */}
+      {showTableGrid && (
+        <div style={{ ...styles.dropdown, left: 12 }}>
+          <div style={styles.tableGridWrapper}>
+            <div style={styles.dropTitle}>Insert Table</div>
+            <div 
+              style={styles.tableGridCells}
+              onMouseLeave={() => setHoveredGrid({ r: 0, c: 0 })}
+            >
+              {Array.from({ length: 10 }).map((_, r) => (
+                Array.from({ length: 10 }).map((_, c) => {
+                  const isActive = (r + 1) <= hoveredGrid.r && (c + 1) <= hoveredGrid.c;
+                  return (
+                    <div
+                      key={`${r}-${c}`}
+                      style={{
+                        ...styles.tableCell,
+                        ...(isActive ? styles.tableCellActive : {}),
+                      }}
+                      onMouseEnter={() => setHoveredGrid({ r: r + 1, c: c + 1 })}
+                      onClick={() => insertTable(r + 1, c + 1)}
+                    />
+                  );
+                })
+              ))}
+            </div>
+            <div style={styles.gridLabel}>
+              {hoveredGrid.r > 0 ? `${hoveredGrid.r} x ${hoveredGrid.c} Table` : "Select dimensions"}
+            </div>
           </div>
         </div>
       )}
@@ -579,6 +617,34 @@ const styles = {
     gridTemplateColumns: "repeat(2, 1fr)",
     gap: 8,
     minWidth: 200,
+  },
+  tableGridWrapper: {
+    width: 180,
+  },
+  tableGridCells: {
+    display: "grid",
+    gridTemplateColumns: "repeat(10, 1fr)",
+    gap: 2,
+    marginTop: 8,
+  },
+  tableCell: {
+    width: 16,
+    height: 16,
+    border: "1px solid #e2e8f0",
+    borderRadius: 2,
+    cursor: "pointer",
+    transition: "all 0.1s ease",
+  },
+  tableCellActive: {
+    background: "#3b82f6",
+    borderColor: "#2563eb",
+  },
+  gridLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#64748b",
+    textAlign: "center",
+    marginTop: 8,
   },
   shapeBtn: {
     display: "flex",

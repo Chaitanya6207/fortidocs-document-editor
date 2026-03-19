@@ -196,6 +196,7 @@ export default function Editor() {
   const lastSavedContentRef = useRef("");
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
   const pendingActionRef = useRef(null); // stores callback to run after save/discard
+  const lastClickRef = useRef(null); // stores coordinates for cursor placement after page switch
 
   /* ---------- HEADER & FOOTER SETTINGS ---------- */
   const [headerFooter, setHeaderFooter] = useState({
@@ -390,79 +391,76 @@ export default function Editor() {
   }, [headerFooter]);
 
   // Switch to a page card and position cursor there
-  // clickX/clickY: optional — the exact browser coordinates of the initiating click.
-  // When provided, cursor is placed precisely using caretRangeFromPoint.
   const switchToPage = useCallback((pageIndex, clickX, clickY) => {
+    if (typeof clickX === 'number' && typeof clickY === 'number') {
+      lastClickRef.current = { x: clickX, y: clickY };
+    } else {
+      lastClickRef.current = null;
+    }
     setActivePage(pageIndex);
     setCurrentPage(pageIndex + 1);
-
-    // Calculate where the scroll container SHOULD stay after the floating editor moves.
-    // We need this ahead-of-time so we can lock it after focus() fires.
-    const wrapEl = pageWrapRef.current;
-
-    // After React re-renders the floating editor onto the new page:
-    setTimeout(() => {
-      const ed = quillRef.current?.getEditor();
-      if (!ed || !contentHeightRef.current) return;
-
-      // --- Step 1: Set cursor ---
-      let cursorSet = false;
-      if (typeof clickX === 'number' && typeof clickY === 'number') {
-        // Use native caret‑hit‑testing for pixel‑perfect placement
-        let range = null;
-        if (document.caretRangeFromPoint) {
-          range = document.caretRangeFromPoint(clickX, clickY);
-        } else if (document.caretPositionFromPoint) {
-          const pos = document.caretPositionFromPoint(clickX, clickY);
-          if (pos) {
-            range = document.createRange();
-            range.setStart(pos.offsetNode, pos.offset);
-          }
-        }
-        if (range && range.startContainer) {
-          try {
-            const blot = Quill.find(
-              range.startContainer.nodeType === 3
-                ? range.startContainer.parentNode
-                : range.startContainer
-            );
-            if (blot) {
-              const quillIndex = ed.getIndex(blot) + range.startOffset;
-              if (typeof quillIndex === 'number' && quillIndex >= 0) {
-                ed.setSelection(quillIndex, 0, 'silent');
-                cursorSet = true;
-              }
-            }
-          } catch (_) { /* fall through */ }
-        }
-      }
-
-      if (!cursorSet) {
-        // Fallback: set cursor to approximate start of the target page
-        const targetY = pageIndex * contentHeightRef.current + 10;
-        const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
-        ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
-      }
-
-      // --- Step 2: Focus WITHOUT letting Quill scroll the container ---
-      // Quill's focus() calls scrollIntoView() internally which resets scrollTop.
-      // We defeat this by: (a) restoring scrollTop immediately after focus,
-      // and (b) temporarily overriding the container's scrollTop setter.
-      if (wrapEl) {
-        const savedScrollTop = wrapEl.scrollTop;
-        // Focus with 'silent' prevents the selection-change event from re-triggering scroll
-        ed.focus();
-        // Immediately restore scroll position (Quill may have moved it)
-        wrapEl.scrollTop = savedScrollTop;
-        // Also restore on next frame in case of async scroll
-        requestAnimationFrame(() => {
-          if (wrapEl) wrapEl.scrollTop = savedScrollTop;
-        });
-      } else {
-        ed.focus();
-      }
-    }, 50);
   }, []);
+
+  // Handle focus and cursor placement after the editor moves to a new page
+  useEffect(() => {
+    const ed = quillRef.current?.getEditor();
+    if (!ed || !contentHeightRef.current) return;
+
+    const wrapEl = pageWrapRef.current;
+    const click = lastClickRef.current;
+    lastClickRef.current = null; // consume it
+
+    // --- Step 1: Set cursor ---
+    let cursorSet = false;
+    if (click) {
+      // Use native caret‑hit‑testing for pixel‑perfect placement
+      let range = null;
+      if (document.caretRangeFromPoint) {
+        range = document.caretRangeFromPoint(click.x, click.y);
+      } else if (document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(click.x, click.y);
+        if (pos) {
+          range = document.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+        }
+      }
+      if (range && range.startContainer) {
+        try {
+          const blot = Quill.find(
+            range.startContainer.nodeType === 3
+              ? range.startContainer.parentNode
+              : range.startContainer
+          );
+          if (blot) {
+            const quillIndex = ed.getIndex(blot) + range.startOffset;
+            if (typeof quillIndex === 'number' && quillIndex >= 0) {
+              ed.setSelection(quillIndex, 0, 'silent');
+              cursorSet = true;
+            }
+          }
+        } catch (_) { /* fall through */ }
+      }
+    }
+
+    if (!cursorSet) {
+      // Fallback: set cursor to approximate start of the target page
+      const targetY = activePage * contentHeightRef.current + 10;
+      const approxIndex = Math.floor((targetY / (ed.root.scrollHeight || 1)) * ed.getLength());
+      ed.setSelection(Math.min(approxIndex, ed.getLength() - 1), 0, 'silent');
+    }
+
+    // --- Step 2: Focus WITHOUT letting Quill scroll the container ---
+    if (wrapEl) {
+      const savedScrollTop = wrapEl.scrollTop;
+      ed.focus();
+      wrapEl.scrollTop = savedScrollTop;
+      requestAnimationFrame(() => {
+        if (wrapEl) wrapEl.scrollTop = savedScrollTop;
+      });
+    } else {
+      ed.focus();
+    }
+  }, [activePage, totalPages]); // Re-run when page changes
 
   /* ---------- SCROLL TO PAGE ---------- */
   const scrollToPage = useCallback((pageNum) => {
@@ -1106,6 +1104,7 @@ const shareDoc = () => {
           editor={editor}
           viewSettings={viewSettings}
           setViewSettings={setViewSettings}
+          totalPages={totalPages}
         />
       )}
 
@@ -1202,7 +1201,7 @@ const shareDoc = () => {
                                   <div
                                     className="ql-editor"
                                     style={{
-                                      padding: `${thumbMarginPx}px`,
+                                      padding: `0 ${thumbMarginPx}px`,
                                       marginTop: -contentOffset,
                                       overflow: 'visible',
                                       pointerEvents: 'none',
@@ -1349,12 +1348,8 @@ const shareDoc = () => {
                           }}
                           onMouseDown={(e) => {
                             if (!isActive) {
-                              // Capture click coordinates BEFORE React re-renders
-                              // (after re-render the mirror is hidden & floating editor takes over)
                               const cx = e.clientX;
                               const cy = e.clientY;
-                              // Prevent the browser from processing this as a text selection
-                              // (the mirror content is non-interactive)
                               e.preventDefault();
                               switchToPage(i, cx, cy);
                             }
@@ -1431,8 +1426,6 @@ const shareDoc = () => {
                             : range.startContainer)
                         ) + range.startOffset;
                         if (typeof quillIndex === 'number' && quillIndex >= 0) {
-                          // Prevent Quill's own (broken) click handler from overriding our selection
-                          e.preventDefault();
                           ed.setSelection(quillIndex, 0, 'user');
                           ed.focus();
                           return;

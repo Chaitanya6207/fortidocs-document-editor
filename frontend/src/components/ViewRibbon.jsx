@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-export default function ViewRibbon({ viewSettings, setViewSettings, editor }) {
+export default function ViewRibbon({ viewSettings, setViewSettings, editor, totalPages }) {
   if (!editor) return null;
 
   const update = (key, value) => setViewSettings((prev) => ({ ...prev, [key]: value }));
@@ -28,7 +28,8 @@ export default function ViewRibbon({ viewSettings, setViewSettings, editor }) {
     const words = text ? text.split(/\s+/).length : 0;
     const chars = text.length;
     const lines = text ? text.split(/\n/).length : 0;
-    const pages = Math.max(1, Math.ceil(words / 250));
+    // Use the real totalPages from Editor if provided, else fallback to estimation
+    const pages = totalPages || Math.max(1, Math.ceil(words / 250));
     return { words, chars, lines, pages };
   };
 
