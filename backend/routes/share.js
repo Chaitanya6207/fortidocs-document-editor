@@ -71,14 +71,19 @@ router.post("/", auth, async (req, res) => {
       }
     }
 
-    const access = await FileAccess.create({
-      fileId: file._id,
-      ownerId: req.user.id,
-      recipientEmail: normalizedEmail,
-      permission: perm,
-      encryptedKey: encryptedKey || "",
-      serverEncryptedKey: srvKey,
-    });
+    const access = await FileAccess.findOneAndUpdate(
+      { fileId: file._id, recipientEmail: normalizedEmail },
+      {
+        $set: {
+          ownerId: req.user.id,
+          permission: perm,
+          encryptedKey: encryptedKey || "",
+          serverEncryptedKey: srvKey,
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true, new: true }
+    );
 
     // === UPDATE ACCESS CONTROL LIST ===
     if (!file.accessList) file.accessList = [];
