@@ -222,6 +222,7 @@ export default function Editor() {
   const [sharedFileLoading, setSharedFileLoading] = useState(false);
   const sharedEditRef = useRef(false);
   const sharedFileIdRef = useRef(sharedFileId);
+  const [currentFileId, setCurrentFileId] = useState(null); // tracks saved file _id for own docs
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versionHistory, setVersionHistory] = useState(null);
   const [changeSummary, setChangeSummary] = useState(null);
@@ -592,6 +593,10 @@ export default function Editor() {
       isDirtyRef.current = false;
       setDocName("");
       setAesKey(generateAESKey());
+      setIsSharedEdit(false);
+      sharedEditRef.current = false;
+      sharedFileIdRef.current = null;
+      setCurrentFileId(null);
       showStatus("New document created with encryption key");
     });
   };
@@ -612,6 +617,10 @@ export default function Editor() {
           const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
           setDocName(nameWithoutExt);
           setAesKey(generateAESKey());
+          setIsSharedEdit(false);
+          sharedEditRef.current = false;
+          sharedFileIdRef.current = null;
+          setCurrentFileId(null);
           showStatus(`Opened: ${file.name}`);
         };
         reader.readAsText(file);
@@ -650,7 +659,28 @@ export default function Editor() {
       return;
     }
 
-    // --- NORMAL SAVE ---
+    // --- SUBSEQUENT SAVE (file already saved once — create new version) ---
+    if (currentFileId) {
+      try {
+        showStatus("Creating new version…");
+        const res = await api.post(`/api/doc/edit/${currentFileId}`, { content });
+        const { version, cid, changeSummary: cs } = res.data;
+        lastSavedContentRef.current = content;
+        isDirtyRef.current = false;
+        showStatus(`✅ Version ${version} saved! CID: ${cid?.substring(0, 12)}…`);
+
+        if (cs) {
+          setChangeSummary({ ...cs, version, cid, filename: res.data.filename || docName });
+          setShowChangeSummary(true);
+        }
+      } catch (err) {
+        console.error("Save version error:", err);
+        showStatus(err.response?.data?.error || "Failed to save version");
+      }
+      return;
+    }
+
+    // --- FIRST SAVE (new file) ---
     let name = docName;
     if (!name) {
       name = askForName();
@@ -684,6 +714,12 @@ export default function Editor() {
 
       lastSavedContentRef.current = content;
       isDirtyRef.current = false;
+
+      // Track the saved file ID so subsequent saves create new versions
+      if (res.data._id) {
+        setCurrentFileId(res.data._id);
+      }
+
       showStatus(`🔒 Encrypted & saved "${name}"! CID: ${res.data.cid?.substring(0, 12)}…`);
     } catch (err) {
       console.error("Save error:", err);
@@ -732,7 +768,9 @@ export default function Editor() {
     showStatus(`Saved "${name}.html" to Downloads`);
 
     // Log the local save in the background
+    const logFileId = sharedFileIdRef.current || currentFileId;
     api.post("/api/doc/log", {
+      fileId: logFileId || undefined,
       action: "SAVED_LOCAL",
       details: `Downloaded "${name}.html" locally`,
     }).catch(() => {});
@@ -773,11 +811,11 @@ const shareDoc = () => {
     try {
       // --- SHARING A RECEIVED/SHARED FILE (re-share) ---
       const isShared = sharedEditRef.current;
-      const existingFileId = sharedFileIdRef.current;
-      if (isShared && existingFileId) {
+      const existingFileId = sharedFileIdRef.current || currentFileId;
+      if ((isShared && existingFileId) || currentFileId) {
         showStatus("Sharing document…");
         await api.post("/api/share", {
-          fileId: existingFileId,
+          fileId: existingFileId || currentFileId,
           recipientEmail: recipientEmail.toLowerCase(),
           permission,
         });
@@ -815,6 +853,11 @@ const shareDoc = () => {
         aesKey: currentKey,
       });
       const file = saveRes.data;
+
+      // Track the saved file ID so subsequent actions use this record
+      if (file._id) {
+        setCurrentFileId(file._id);
+      }
 
       // 3. Share — server stores a server-encrypted key for the recipient
       await api.post("/api/share", {

@@ -192,10 +192,12 @@ export default function Viewer() {
 
       {!loading && !error && !canEdit && (
         <div style={styles.pageWrap}>
-          <div className="ql-snow" style={styles.page}>
+          <div className="ql-snow" style={{ ...styles.page, ...styles.readOnly }}>
             <div
               className="ql-editor"
               dangerouslySetInnerHTML={{ __html: html }}
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
             />
           </div>
         </div>
@@ -316,5 +318,11 @@ const styles = {
     padding: 40,
     boxShadow: "0 2px 16px rgba(0,0,0,0.08)",
     borderRadius: 4,
+  },
+  readOnly: {
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    MozUserSelect: "none",
+    msUserSelect: "none",
   },
 };
