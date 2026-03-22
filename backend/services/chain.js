@@ -6,7 +6,7 @@ async function logShareOnChain(ownerPrivateKey, contractAddress, rpcUrl, recipie
     console.warn('Chain logging not configured (missing ownerPrivateKey or contractAddress)');
     return null;
   }
-  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(ownerPrivateKey, provider);
   const abi = ["function logShare(address recipient, string cid, string action) external"];
   const contract = new ethers.Contract(contractAddress, abi, wallet);
@@ -31,7 +31,7 @@ async function logVersionOnChain(ownerPrivateKey, contractAddress, rpcUrl, {
     return null;
   }
   try {
-    const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
     const wallet = new ethers.Wallet(ownerPrivateKey, provider);
     const abi = [
       "function logVersion(string fileHash, string previousCid, string newCid, address editor, uint256 version) external"
@@ -41,7 +41,7 @@ async function logVersionOnChain(ownerPrivateKey, contractAddress, rpcUrl, {
       fileHash,
       previousCid || "",
       cid,
-      editorWallet || ethers.constants.AddressZero,
+      editorWallet || ethers.ZeroAddress,
       version
     );
     const receipt = await tx.wait();
