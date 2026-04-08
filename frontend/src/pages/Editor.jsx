@@ -16,6 +16,7 @@ import MyFiles from "./MyFiles";
 
 import { useNavigate, useSearchParams } from "react-router-dom";
 import htmlDocx from "html-docx-js/dist/html-docx";
+import * as mammoth from "mammoth/mammoth.browser";
 import { saveAs } from "file-saver";
 
 import api from "../utils/api";
@@ -605,25 +606,59 @@ export default function Editor() {
     guardUnsaved(() => {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = ".html,.htm,.txt";
+      input.accept = ".html,.htm,.txt,.docx";
       input.onchange = (e) => {
-        const file = e.target.files[0];
+        const file = e.target.files?.[0];
         if (!file) return;
+
+        const extension = (file.name.match(/\.([^.]+)$/)?.[1] || "").toLowerCase();
+        const supportedFormats = new Set(["html", "htm", "txt", "docx"]);
+
+        if (!supportedFormats.has(extension)) {
+          showStatus("Unsupported file type. Please open a .docx, .txt, or .html document.");
+          return;
+        }
+
         const reader = new FileReader();
-        reader.onload = (ev) => {
-          setContent(ev.target.result);
-          lastSavedContentRef.current = ev.target.result;
-          isDirtyRef.current = false;
-          const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
-          setDocName(nameWithoutExt);
-          setAesKey(generateAESKey());
-          setIsSharedEdit(false);
-          sharedEditRef.current = false;
-          sharedFileIdRef.current = null;
-          setCurrentFileId(null);
-          showStatus(`Opened: ${file.name}`);
+        reader.onload = async (ev) => {
+          try {
+            let safeContent = "";
+
+            if (extension === "txt") {
+              safeContent = String(ev.target?.result || "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/\n/g, "<br/>");
+            } else if (extension === "docx") {
+              const result = await mammoth.convertToHtml({ arrayBuffer: ev.target?.result });
+              safeContent = result.value || "<p><em>Document is empty.</em></p>";
+            } else {
+              safeContent = String(ev.target?.result || "");
+            }
+
+            setContent(safeContent);
+            lastSavedContentRef.current = safeContent;
+            isDirtyRef.current = false;
+            const nameWithoutExt = file.name.replace(/\.[^.]+$/, "");
+            setDocName(nameWithoutExt);
+            setAesKey(generateAESKey());
+            setIsSharedEdit(false);
+            sharedEditRef.current = false;
+            sharedFileIdRef.current = null;
+            setCurrentFileId(null);
+            showStatus(`Opened: ${file.name}`);
+          } catch (err) {
+            console.error("Open document error:", err);
+            showStatus("Failed to open the document. Please try another .docx or text file.");
+          }
         };
-        reader.readAsText(file);
+
+        if (extension === "docx") {
+          reader.readAsArrayBuffer(file);
+        } else {
+          reader.readAsText(file);
+        }
       };
       input.click();
     });

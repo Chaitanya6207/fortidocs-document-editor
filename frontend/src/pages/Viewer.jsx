@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import ReactQuill from "react-quill";
+import * as mammoth from "mammoth/mammoth.browser";
 import "react-quill/dist/quill.snow.css";
 import api from "../utils/api";
 
@@ -13,6 +14,21 @@ import api from "../utils/api";
  *   filename   — display name
  *   permission — VIEW or EDIT
  */
+const previewableExtensions = new Set(["html", "htm", "txt", "docx"]);
+
+function getExtension(name = "") {
+  return (name.match(/\.([^.]+)$/)?.[1] || "").toLowerCase();
+}
+
+function canPreviewInline(name = "") {
+  const extension = getExtension(name);
+  return !extension || previewableExtensions.has(extension);
+}
+
+function isWordDocument(name = "") {
+  return getExtension(name) === "docx";
+}
+
 export default function Viewer() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -48,21 +64,71 @@ export default function Viewer() {
 
     const loadDocument = async () => {
       try {
+        if (isWordDocument(filename)) {
+          let docxCid = cid;
+
+          if (!docxCid && fileId) {
+            const metaRes = await api.get(`/api/files/${fileId}`);
+            docxCid = metaRes.data?.cid || "";
+          }
+
+          if (!docxCid) {
+            setError("No CID available for this Word document.");
+            return;
+          }
+
+          setDisplayCid(docxCid);
+          const docxRes = await fetch(`https://gateway.pinata.cloud/ipfs/${docxCid}`);
+          if (!docxRes.ok) {
+            throw new Error(`DOCX fetch failed (${docxRes.status})`);
+          }
+
+          const arrayBuffer = await docxRes.arrayBuffer();
+          const result = await mammoth.convertToHtml({ arrayBuffer });
+          const docxHtml = result.value || "<p><em>Document is empty.</em></p>";
+
+          if (cancelled) return;
+          setHtml(docxHtml);
+          currentContent.current = docxHtml;
+          setIsEncrypted(false);
+          return;
+        }
+
         if (fileId) {
           const res = await api.get(`/api/doc/view/${fileId}`);
           if (cancelled) return;
 
-          const { html: docHtml, cid: docCid, encrypted, permission: serverPerm } = res.data;
-          setHtml(docHtml);
-          currentContent.current = docHtml;
+          const {
+            html: docHtml,
+            cid: docCid,
+            encrypted,
+            permission: serverPerm,
+            filename: serverFilename,
+          } = res.data;
+
+          const resolvedName = serverFilename || filename;
           setIsEncrypted(!!encrypted);
           if (docCid) setDisplayCid(docCid);
           if (serverPerm) setPermission(serverPerm);
+
+          if (!encrypted && !canPreviewInline(resolvedName)) {
+            setError("This file type cannot be previewed in the editor. Please download it from the IPFS link instead.");
+            return;
+          }
+
+          setHtml(docHtml);
+          currentContent.current = docHtml;
           return;
         }
 
         if (!cid) {
           setError("No file ID or CID provided.");
+          return;
+        }
+
+        if (!canPreviewInline(filename)) {
+          setDisplayCid(cid);
+          setError("This file type cannot be previewed in the editor. Please download it from the IPFS link instead.");
           return;
         }
 
@@ -98,7 +164,7 @@ export default function Viewer() {
 
     loadDocument();
     return () => { cancelled = true; };
-  }, [fileId, cid]);
+  }, [fileId, cid, filename]);
 
   const saveEdits = async () => {
     if (!fileId || !canEdit) return;
@@ -186,6 +252,18 @@ export default function Viewer() {
         <div style={styles.center}>
           <div style={styles.errorBox}>
             <strong>Error:</strong> {error}
+            {displayCid && (
+              <div style={{ marginTop: 12 }}>
+                <a
+                  href={`https://gateway.pinata.cloud/ipfs/${displayCid}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={styles.downloadLink}
+                >
+                  Open / Download from IPFS
+                </a>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -305,6 +383,15 @@ const styles = {
     borderRadius: 8,
     border: "1px solid #fecaca",
     fontSize: 14,
+  },
+  downloadLink: {
+    display: "inline-block",
+    background: "#2563eb",
+    color: "#fff",
+    textDecoration: "none",
+    padding: "8px 12px",
+    borderRadius: 6,
+    fontWeight: 600,
   },
   pageWrap: {
     padding: 30,

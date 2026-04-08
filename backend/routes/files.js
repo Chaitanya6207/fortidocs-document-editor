@@ -9,13 +9,11 @@ const auth = require('../middleware/auth');
 
 const router = express.Router();
 
-const allowedExtensions = new Set(['.pdf', '.doc', '.docx', '.txt', '.html', '.htm']);
+const allowedExtensions = new Set(['.txt', '.html', '.htm', '.docx']);
 const allowedMimeTypes = new Set([
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/plain',
   'text/html',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/octet-stream'
 ]);
 
@@ -30,7 +28,7 @@ const upload = multer({
       return cb(null, true);
     }
 
-    return cb(new Error('Only PDF, DOC, DOCX, TXT, and HTML files can be uploaded.'));
+    return cb(new Error('Only TXT, HTML, and DOCX files are currently supported in the editor.'));
   }
 });
 
