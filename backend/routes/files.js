@@ -8,39 +8,72 @@ const { pinFileFromPath } = require('../services/pinata');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
-const upload = multer({ dest: path.join(__dirname, '..', 'uploads') }); // ensure uploads/ exists
+
+const allowedExtensions = new Set(['.pdf', '.doc', '.docx', '.txt', '.html', '.htm']);
+const allowedMimeTypes = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'text/html',
+  'application/octet-stream'
+]);
+
+const upload = multer({
+  dest: path.join(__dirname, '..', 'uploads'),
+  fileFilter: (req, file, cb) => {
+    const extension = path.extname(file.originalname || '').toLowerCase();
+    const isAllowedExtension = allowedExtensions.has(extension);
+    const isAllowedMimeType = allowedMimeTypes.has(file.mimetype);
+
+    if (isAllowedExtension && isAllowedMimeType) {
+      return cb(null, true);
+    }
+
+    return cb(new Error('Only PDF, DOC, DOCX, TXT, and HTML files can be uploaded.'));
+  }
+});
 
 // POST /api/files/upload
 // multipart/form-data: file (and optional ownerWallet)
-router.post('/upload', auth, upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+router.post('/upload', auth, (req, res) => {
+  upload.single('file')(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      return res.status(400).json({ error: uploadErr.message || 'Invalid file upload' });
+    }
 
-    // pin to pinata
-    const result = await pinFileFromPath(req.file.path, req.file.originalname);
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // create db record
-    const fileDoc = await File.create({
-      ownerId: req.user.id,
-      ownerWallet: req.body.ownerWallet || '',
-      filename: req.file.originalname,
-      cid: result.IpfsHash || result.ipfsHash || result.hash, // some responses vary
-      mimeType: req.file.mimetype,
-      size: req.file.size
-    });
+      // pin to pinata
+      const result = await pinFileFromPath(req.file.path, req.file.originalname);
 
-    // cleanup temp file
-    try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+      // create db record
+      const fileDoc = await File.create({
+        ownerId: req.user.id,
+        ownerWallet: req.body.ownerWallet || '',
+        filename: req.file.originalname,
+        cid: result.IpfsHash || result.ipfsHash || result.hash, // some responses vary
+        mimeType: req.file.mimetype,
+        size: req.file.size
+      });
 
-    res.json({
-      fileId: fileDoc._id,
-      cid: fileDoc.cid,
-      gatewayUrl: `https://gateway.pinata.cloud/ipfs/${fileDoc.cid}`
-    });
-  } catch (err) {
-    console.error('Upload error', err);
-    res.status(500).json({ error: 'Upload failed' });
-  }
+      // cleanup temp file
+      try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+
+      res.json({
+        fileId: fileDoc._id,
+        cid: fileDoc.cid,
+        gatewayUrl: `https://gateway.pinata.cloud/ipfs/${fileDoc.cid}`
+      });
+    } catch (err) {
+      if (req.file?.path) {
+        try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+      }
+      console.error('Upload error', err);
+      res.status(500).json({ error: 'Upload failed' });
+    }
+  });
 });
 
 // GET /api/files/my - list files owned by logged-in user
